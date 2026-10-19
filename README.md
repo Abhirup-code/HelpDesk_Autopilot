@@ -24,6 +24,43 @@ HelpDesk Autopilot turns routine tickets into automated, approved and logged wor
 | Offboarding | Often delayed or forgotten | Account disabled and groups removed on the last day |
 | Access request | Approved in chat, no record | Manager approval required, logged |
 
+## Architecture
+
+```mermaid
+flowchart LR
+    U[Employee / Manager] --> P[Web portal]
+    A[IT agent] --> P
+    P --> API[FastAPI service]
+    API --> DB[(PostgreSQL<br/>tickets + audit log)]
+    API --> W[Automation worker]
+    W --> L[(OpenLDAP directory)]
+    W --> DB
+    API -- /metrics --> PR[Prometheus]
+    PR --> G[Grafana SLA dashboard]
+```
+
+## Tech stack
+
+| Area | Tools |
+|---|---|
+| App | Python, FastAPI, PostgreSQL |
+| Directory | OpenLDAP (stands in for Active Directory / Entra ID) |
+| Scripts | Python, PowerShell (bulk onboarding from CSV) |
+| Testing | pytest, Playwright, 90% coverage gate |
+| DevOps | Docker Compose, GitHub Actions, Trivy, CodeQL |
+| Monitoring | Prometheus, Grafana |
+
+## Roadmap
+
+- [x] Requirements: BRD, user stories, process maps, SLA policy
+- [ ] Ticket API with PostgreSQL and tests
+- [ ] Directory automation: onboarding, offboarding, password reset
+- [ ] Manager approvals and audit log
+- [ ] Web portal with Playwright tests
+- [ ] CI pipeline with security scans
+- [ ] Prometheus metrics and Grafana SLA dashboard
+- [ ] Demo data, screenshots and walkthrough
+
 ## Documentation
 
 - [Business Requirements Document](docs/BRD.md)
