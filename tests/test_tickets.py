@@ -3,9 +3,9 @@ from datetime import datetime
 from tests.conftest import auth
 
 NEW_TICKET = {
-    "type": "password_reset",
-    "title": "Locked out of email",
-    "description": "MFA prompt keeps failing after phone change.",
+    "type": "hardware",
+    "title": "Laptop will not charge",
+    "description": "Charger light is off and battery is at 3%.",
 }
 
 
@@ -18,6 +18,7 @@ def test_health(client):
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
     assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Cache-Control"] == "no-store"
 
 
 def test_create_ticket_uses_default_priority_and_due_time(client):
@@ -25,15 +26,22 @@ def test_create_ticket_uses_default_priority_and_due_time(client):
     assert response.status_code == 201
     body = response.json()
     assert body["status"] == "new"
+    assert body["priority"] == "P3"
+    assert body["details"] == {}
+    assert body["automation_error"] is None
+    assert body["sla_breached"] is False
+
+
+def test_password_reset_gets_p2_and_four_hour_target(client):
+    body = create(client, type="password_reset", title="Locked out of email").json()
     assert body["priority"] == "P2"
     created = datetime.fromisoformat(body["created_at"])
     due = datetime.fromisoformat(body["due_at"])
     assert (due - created).total_seconds() == 4 * 3600
-    assert body["sla_breached"] is False
 
 
 def test_create_ticket_with_priority_override(client):
-    body = create(client, type="hardware", priority="P1").json()
+    body = create(client, priority="P1").json()
     assert body["priority"] == "P1"
 
 
@@ -58,7 +66,7 @@ def test_employee_sees_only_own_tickets(client):
     create(client, who="emma")
     create(client, who="liam", title="Need Tableau access", type="access_request")
     mine = client.get("/api/tickets", headers=auth("emma")).json()
-    assert [t["title"] for t in mine] == ["Locked out of email"]
+    assert [t["title"] for t in mine] == ["Laptop will not charge"]
 
 
 def test_other_users_ticket_is_404(client):
@@ -78,8 +86,8 @@ def test_missing_ticket_is_404(client):
 
 
 def test_agent_sees_all_tickets_and_can_filter(client):
-    create(client, who="emma")
-    create(client, who="liam", title="Laptop screen cracked", type="hardware")
+    create(client, who="emma", type="password_reset", title="Locked out of email")
+    create(client, who="liam", title="Laptop screen cracked")
     everything = client.get("/api/tickets", headers=auth("ava")).json()
     assert len(everything) == 2
     hardware = client.get("/api/tickets?type=hardware", headers=auth("ava")).json()
@@ -87,14 +95,14 @@ def test_agent_sees_all_tickets_and_can_filter(client):
     p3 = client.get("/api/tickets?priority=P3", headers=auth("ava")).json()
     assert len(p3) == 1
     new = client.get("/api/tickets?status=new", headers=auth("ava")).json()
-    assert len(new) == 2
+    assert [t["title"] for t in new] == ["Laptop screen cracked"]
 
 
 def test_queue_is_sorted_by_due_time(client):
-    create(client, type="hardware", title="Low priority mouse", priority="P4")
-    create(client, type="offboarding", title="Offboard contractor")
+    create(client, title="Low priority mouse", priority="P4")
+    create(client, title="Server room is flooding", priority="P1")
     titles = [t["title"] for t in client.get("/api/tickets", headers=auth("ava")).json()]
-    assert titles == ["Offboard contractor", "Low priority mouse"]
+    assert titles == ["Server room is flooding", "Low priority mouse"]
 
 
 def test_agent_resolves_ticket(client):

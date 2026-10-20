@@ -41,3 +41,21 @@ def due_at(priority: Priority, created_at: datetime) -> datetime:
     if priority in CLOCK_HOURS:
         return created_at + timedelta(hours=CLOCK_HOURS[priority])
     return add_business_days(created_at, BUSINESS_DAYS[priority])
+
+
+def ticket_due_at(
+    ticket_type: TicketType, priority: Priority, created_at: datetime, details: dict
+) -> datetime:
+    """Due time for a ticket, including the date-based rules in the SLA policy."""
+    due = due_at(priority, created_at)
+    if ticket_type == TicketType.NEW_HIRE:
+        # Ready by 9:00 UTC on the start date, if that is sooner than the normal target.
+        start = datetime.fromisoformat(details["start_date"]).replace(
+            hour=9, tzinfo=created_at.tzinfo
+        )
+        return max(min(due, start), created_at)
+    if ticket_type == TicketType.OFFBOARDING:
+        # Access must be gone within 1 hour after the last day ends.
+        last_day = datetime.fromisoformat(details["last_day"]).replace(tzinfo=created_at.tzinfo)
+        return max(last_day + timedelta(days=1, hours=1), created_at + timedelta(hours=1))
+    return due

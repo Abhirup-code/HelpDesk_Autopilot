@@ -1,0 +1,77 @@
+dn: dc=example,dc=com
+objectClass: dcObject
+objectClass: organization
+dc: example
+o: Example Corp
+
+dn: ou=Users,dc=example,dc=com
+objectClass: organizationalUnit
+ou: Users
+
+dn: ou=Groups,dc=example,dc=com
+objectClass: organizationalUnit
+ou: Groups
+
+dn: ou=Disabled,dc=example,dc=com
+objectClass: organizationalUnit
+ou: Disabled
+description: Accounts of people who have left. No password, no groups.
+
+dn: ou=Services,dc=example,dc=com
+objectClass: organizationalUnit
+ou: Services
+
+dn: cn=autopilot,ou=Services,dc=example,dc=com
+objectClass: applicationProcess
+objectClass: simpleSecurityObject
+cn: autopilot
+description: Service account used by HelpDesk Autopilot
+userPassword: __SERVICE_PW__
+
+dn: cn=all-staff,ou=Groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: all-staff
+description: Everyone
+member: cn=autopilot,ou=Services,dc=example,dc=com
+
+dn: cn=finance-share,ou=Groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: finance-share
+description: Finance shared drive
+member: cn=autopilot,ou=Services,dc=example,dc=com
+
+dn: cn=erp-users,ou=Groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: erp-users
+description: ERP system access
+member: cn=autopilot,ou=Services,dc=example,dc=com
+
+dn: cn=git-users,ou=Groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: git-users
+description: Source code access
+member: cn=autopilot,ou=Services,dc=example,dc=com
+
+dn: cn=vpn-users,ou=Groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: vpn-users
+description: VPN access
+member: cn=autopilot,ou=Services,dc=example,dc=com
+
+dn: cn=tableau-users,ou=Groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: tableau-users
+description: Tableau reporting
+member: cn=autopilot,ou=Services,dc=example,dc=com
+
+dn: cn=helpdesk-agents,ou=Groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: helpdesk-agents
+description: Help desk tools
+member: cn=autopilot,ou=Services,dc=example,dc=com
+
+dn: cn=it-admins,ou=Groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: it-admins
+description: Domain administrators (privileged)
+member: cn=autopilot,ou=Services,dc=example,dc=com
