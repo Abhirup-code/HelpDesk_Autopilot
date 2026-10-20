@@ -6,8 +6,17 @@ from sqlalchemy.orm import Session
 
 from app import sla
 from app.auth import require_agent
+from app.automation import Automator, today_utc
+from app.directory import Directory
 from app.models import CLOSED_STATUSES, Priority, Role, Status, Ticket, TicketType, User, utcnow
-from app.schemas import StatusUpdate, TicketCreate, TicketOut
+from app.schemas import ErrorOut, StatusUpdate, TicketCreate, TicketOut
+
+UNAUTHORIZED = {401: {"model": ErrorOut, "description": "Missing or invalid token"}}
+FORBIDDEN = {403: {"model": ErrorOut, "description": "Your role cannot do this"}}
+NOT_FOUND = {404: {"model": ErrorOut, "description": "Ticket not found or not yours"}}
+
+# Only managers and IT can request account changes for other people.
+PEOPLE_CHANGES = {TicketType.NEW_HIRE, TicketType.OFFBOARDING}
 
 
 def serialize(ticket: Ticket) -> TicketOut:
@@ -23,11 +32,13 @@ def serialize(ticket: Ticket) -> TicketOut:
         due_at=ticket.due_at,
         resolved_at=ticket.resolved_at,
         sla_breached=ticket.is_breached(),
+        details=ticket.details or {},
+        automation_error=ticket.automation_error,
     )
 
 
-def build_router(get_session, current_user) -> APIRouter:
-    router = APIRouter(prefix="/api/tickets", tags=["tickets"])
+def build_router(get_session, current_user, directory: Directory, base_url: str) -> APIRouter:
+    router = APIRouter(prefix="/api/tickets", tags=["tickets"], responses=UNAUTHORIZED)
 
     def visible_ticket(ticket_id: int, user: User, session: Session) -> Ticket:
         ticket = session.get(Ticket, ticket_id)
@@ -36,12 +47,26 @@ def build_router(get_session, current_user) -> APIRouter:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Ticket not found")
         return ticket
 
-    @router.post("", response_model=TicketOut, status_code=status.HTTP_201_CREATED)
+    @router.post(
+        "",
+        response_model=TicketOut,
+        status_code=status.HTTP_201_CREATED,
+        responses={**FORBIDDEN},
+    )
     def create_ticket(
         body: TicketCreate,
         user: User = Depends(current_user),
         session: Session = Depends(get_session),
     ) -> TicketOut:
+        if body.type in PEOPLE_CHANGES and user.role == Role.EMPLOYEE:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Only managers and IT can request this")
+        if body.type == TicketType.OFFBOARDING and not directory.user_exists(
+            body.details["username"]
+        ):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"No directory account named {body.details['username']}",
+            )
         now = utcnow()
         priority = body.priority or sla.default_priority(body.type)
         ticket = Ticket(
@@ -52,10 +77,12 @@ def build_router(get_session, current_user) -> APIRouter:
             description=body.description,
             requester_id=user.id,
             created_at=now,
-            due_at=sla.due_at(priority, now),
+            due_at=sla.ticket_due_at(body.type, priority, now, body.details),
+            details=body.details,
         )
         session.add(ticket)
         session.commit()
+        Automator(session, directory, base_url).handle_new_ticket(ticket, today_utc())
         return serialize(ticket)
 
     @router.get("", response_model=list[TicketOut])
@@ -77,7 +104,7 @@ def build_router(get_session, current_user) -> APIRouter:
             query = query.where(Ticket.priority == priority)
         return [serialize(t) for t in session.scalars(query)]
 
-    @router.get("/{ticket_id}", response_model=TicketOut)
+    @router.get("/{ticket_id}", response_model=TicketOut, responses={**NOT_FOUND})
     def get_ticket(
         ticket_id: int,
         user: User = Depends(current_user),
@@ -85,7 +112,11 @@ def build_router(get_session, current_user) -> APIRouter:
     ) -> TicketOut:
         return serialize(visible_ticket(ticket_id, user, session))
 
-    @router.patch("/{ticket_id}/status", response_model=TicketOut)
+    @router.patch(
+        "/{ticket_id}/status",
+        response_model=TicketOut,
+        responses={**FORBIDDEN, **NOT_FOUND},
+    )
     def update_status(
         ticket_id: int,
         body: StatusUpdate,

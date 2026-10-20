@@ -1,10 +1,37 @@
 """Request and response shapes."""
 
-from datetime import datetime
+from datetime import date, datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models import Priority, Status, TicketType
+from app.policy import DEPARTMENTS, MIN_PASSWORD_LENGTH
+
+NAME_PATTERN = r"^[A-Za-z][A-Za-z '\-]{0,63}$"
+USERNAME_PATTERN = r"^[a-z][a-z0-9]{1,31}$"
+
+
+class NewHireDetails(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    first_name: str = Field(pattern=NAME_PATTERN)
+    last_name: str = Field(pattern=NAME_PATTERN)
+    department: Literal[tuple(DEPARTMENTS)]  # type: ignore[valid-type]
+    start_date: date
+
+
+class OffboardingDetails(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(pattern=USERNAME_PATTERN)
+    last_day: date
+
+
+DETAIL_MODELS: dict[TicketType, type[BaseModel]] = {
+    TicketType.NEW_HIRE: NewHireDetails,
+    TicketType.OFFBOARDING: OffboardingDetails,
+}
 
 
 class TicketCreate(BaseModel):
@@ -12,6 +39,7 @@ class TicketCreate(BaseModel):
     title: str = Field(min_length=3, max_length=200)
     description: str = Field(min_length=1, max_length=5000)
     priority: Priority | None = None
+    details: dict = Field(default_factory=dict)
 
     @field_validator("title", "description")
     @classmethod
@@ -20,6 +48,16 @@ class TicketCreate(BaseModel):
         if not value:
             raise ValueError("must not be blank")
         return value
+
+    @model_validator(mode="after")
+    def check_details(self) -> "TicketCreate":
+        model = DETAIL_MODELS.get(self.type)
+        if model is None:
+            if self.details:
+                raise ValueError(f"{self.type.value} tickets take no details")
+            return self
+        self.details = model.model_validate(self.details).model_dump(mode="json")
+        return self
 
 
 class StatusUpdate(BaseModel):
@@ -40,3 +78,22 @@ class TicketOut(BaseModel):
     due_at: datetime
     resolved_at: datetime | None
     sla_breached: bool
+    details: dict
+    automation_error: str | None
+
+
+class PasswordResetRedeem(BaseModel):
+    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=128)
+
+
+class InboxMessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    subject: str
+    body: str
+    created_at: datetime
+
+
+class ErrorOut(BaseModel):
+    detail: str
