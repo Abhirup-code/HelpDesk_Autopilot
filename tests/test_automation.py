@@ -60,7 +60,7 @@ def test_password_reset_auto_resolves_and_sends_link(client, app):
     assert "http://test/api/password-resets/" in messages[0]["body"]
     assert inbox(client, "liam") == []  # nobody else sees it
 
-    assert ("password_link.issue", "emma", "valid for 0:15:00") in audit(app)
+    assert ("password_link.issue", "emma", "valid for 15 minutes") in audit(app)
 
 
 def test_reset_token_is_stored_only_as_hash(client, app):
@@ -162,6 +162,7 @@ def test_new_hire_creates_account_with_department_groups(client, app, directory)
     assert message["subject"] == "New hire ready: Jane Doe"
     assert "Username: jdoe" in message["body"]
     assert "72 hours" in message["body"]
+    assert ("password_link.issue", "jdoe", "valid for 72 hours") in audit(app)
 
 
 def test_second_jane_doe_gets_unique_username(client, directory):

@@ -43,6 +43,11 @@ def make_username(first: str, last: str, taken) -> str:
     return candidate
 
 
+def describe(ttl: timedelta) -> str:
+    minutes = int(ttl.total_seconds() // 60)
+    return f"{minutes} minutes" if minutes < 120 else f"{minutes // 60} hours"
+
+
 class Automator:
     def __init__(self, session: Session, directory: Directory, base_url: str) -> None:
         self.session = session
@@ -72,7 +77,7 @@ class Automator:
                 expires_at=utcnow() + ttl,
             )
         )
-        self.audit("password_link.issue", username, ticket, f"valid for {ttl}")
+        self.audit("password_link.issue", username, ticket, f"valid for {describe(ttl)}")
         return f"{self.base_url}/api/password-resets/{token}"
 
     def notify(self, user: User, subject: str, body: str) -> None:
