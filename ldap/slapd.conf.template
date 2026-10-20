@@ -1,0 +1,54 @@
+# OpenLDAP config for the demo directory. Placeholders in __CAPS__ are
+# filled in by entrypoint.sh at first start.
+include  __SCHEMADIR__/core.schema
+include  __SCHEMADIR__/cosine.schema
+include  __SCHEMADIR__/inetorgperson.schema
+
+pidfile  __RUNDIR__/slapd.pid
+argsfile __RUNDIR__/slapd.args
+
+modulepath __MODULEDIR__
+moduleload back_mdb
+moduleload argon2
+
+# Hash every new password with Argon2id.
+password-hash {ARGON2}
+
+# Who can do what. The first matching rule wins.
+# The app binds as the autopilot service account, which can only manage
+# people and groups. It cannot touch the base entry or other service accounts.
+access to attrs=userPassword
+    by dn.exact="cn=autopilot,ou=Services,dc=example,dc=com" write
+    by self write
+    by anonymous auth
+    by * none
+
+access to dn.subtree="ou=Users,dc=example,dc=com"
+    by dn.exact="cn=autopilot,ou=Services,dc=example,dc=com" write
+    by users read
+    by * none
+
+access to dn.subtree="ou=Groups,dc=example,dc=com"
+    by dn.exact="cn=autopilot,ou=Services,dc=example,dc=com" write
+    by users read
+    by * none
+
+access to dn.subtree="ou=Disabled,dc=example,dc=com"
+    by dn.exact="cn=autopilot,ou=Services,dc=example,dc=com" write
+    by users read
+    by * none
+
+access to *
+    by users read
+    by * none
+
+database  mdb
+maxsize   268435456
+suffix    "dc=example,dc=com"
+rootdn    "cn=admin,dc=example,dc=com"
+rootpw    __ROOTPW__
+directory __DATADIR__
+
+index objectClass eq
+index uid         eq
+index member      eq
