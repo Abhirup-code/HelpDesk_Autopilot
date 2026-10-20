@@ -53,13 +53,63 @@ flowchart LR
 ## Roadmap
 
 - [x] Requirements: BRD, user stories, process maps, SLA policy
-- [ ] Ticket API with PostgreSQL and tests
+- [x] Ticket API with PostgreSQL and tests
 - [ ] Directory automation: onboarding, offboarding, password reset
 - [ ] Manager approvals and audit log
 - [ ] Web portal with Playwright tests
 - [ ] CI pipeline with security scans
 - [ ] Prometheus metrics and Grafana SLA dashboard
 - [ ] Demo data, screenshots and walkthrough
+
+## Run it locally
+
+You need Docker Desktop. Run these from the project folder:
+
+```bash
+cp .env.example .env
+docker compose up --build -d
+docker compose exec api python -m app.seed
+```
+
+The last command prints an API token for each demo user:
+
+| User | Role |
+|---|---|
+| emma, noah | Employee |
+| liam | Manager |
+| ava | IT agent |
+
+Open http://127.0.0.1:8000/docs to try the API in your browser. Click **Authorize** and paste a token.
+
+Or use curl:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/tickets \
+  -H "Authorization: Bearer <emma's token>" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"password_reset","title":"Locked out of email","description":"MFA keeps failing"}'
+```
+
+## API (so far)
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | `/health` | Anyone | Health check |
+| POST | `/api/tickets` | Signed in | Create a ticket. Priority and due time follow the SLA policy |
+| GET | `/api/tickets` | Signed in | Employees see their own tickets, IT agents see all. Filter with `status`, `type`, `priority` |
+| GET | `/api/tickets/{id}` | Owner or agent | One ticket. Other people's tickets return 404 |
+| PATCH | `/api/tickets/{id}/status` | Agent | Change status. Resolving records the time |
+
+## Run the tests
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Tests use in-memory SQLite by default. Coverage below 90% fails the run.
 
 ## Documentation
 
