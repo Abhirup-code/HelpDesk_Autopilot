@@ -1,16 +1,25 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.auth import hash_token
+from app.db import Base, make_engine
 from app.main import create_app
 from app.models import Role, User
 
 TOKENS = {"emma": "emma-token", "liam": "liam-token", "ava": "ava-token"}
 
 
+# Set TEST_DATABASE_URL to run the suite against PostgreSQL instead of in-memory SQLite.
+TEST_DB = os.environ.get("TEST_DATABASE_URL", "sqlite://")
+
+
 @pytest.fixture
 def app():
-    app = create_app("sqlite://")
+    if TEST_DB != "sqlite://":
+        Base.metadata.drop_all(make_engine(TEST_DB))
+    app = create_app(TEST_DB)
     with app.state.session_factory() as session:
         manager = User(
             username="liam",
