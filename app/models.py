@@ -20,7 +20,7 @@ class Role(enum.StrEnum):
 
 
 class TicketType(enum.StrEnum):
-    PASSWORD_RESET = "password_reset"
+    PASSWORD_RESET = "password_reset"  # noqa: S105 (ticket type, not a password)
     NEW_HIRE = "new_hire"
     OFFBOARDING = "offboarding"
     ACCESS_REQUEST = "access_request"
