@@ -57,7 +57,7 @@ flowchart LR
 - [x] Requirements: BRD, user stories, process maps, SLA policy
 - [x] Ticket API with PostgreSQL and tests
 - [x] Directory automation: onboarding, offboarding, password reset
-- [ ] Manager approvals and audit log
+- [x] Manager approvals and audit log
 - [ ] Web portal with Playwright tests
 - [ ] CI pipeline with security scans
 - [ ] Prometheus metrics and Grafana SLA dashboard
@@ -100,7 +100,8 @@ curl -X POST http://127.0.0.1:8000/api/tickets \
 | `password_reset` | Anyone | A one-time link (15 minutes, works once) goes to your inbox. Ticket auto-resolves |
 | `new_hire` | Manager or IT | Directory account created with the department's groups. The manager gets the username and a 72-hour set-password link |
 | `offboarding` | Manager or IT | After the last day ends: all groups removed, password removed, account moved to `ou=Disabled` |
-| `access_request`, `hardware` | Anyone | Goes to the IT queue (approvals come in the next step) |
+| `access_request` | Anyone | Goes to your manager. `it-admins` also needs an IT agent. Approved groups are added automatically |
+| `hardware` | Anyone | Goes to the IT queue |
 
 Every directory change is written to the audit log. If an automation fails, completed steps are undone, the ticket moves to `in_progress` with the error, and IT picks it up.
 
@@ -130,6 +131,33 @@ Departments: Engineering, Finance, IT, Operations, Sales.
 
 A past last day runs right away. A future one waits for the worker, which checks every minute.
 
+**Example: access request** (as Emma)
+
+```json
+{
+  "type": "access_request",
+  "title": "Need Tableau",
+  "description": "For month-end reports",
+  "details": {"group": "tableau-users"}
+}
+```
+
+Liam sees it at `GET /api/approvals` and answers with `POST /api/approvals/{id}`:
+
+```json
+{"decision": "approve"}
+```
+
+or
+
+```json
+{"decision": "reject", "reason": "Use the shared dashboard instead"}
+```
+
+Requestable groups: erp-users, finance-share, git-users, helpdesk-agents, it-admins, tableau-users, vpn-users.
+
+While a request waits for the manager, the SLA clock is paused, because IT can't act yet.
+
 ## Security choices
 
 - The app signs in to the directory with a service account that can only manage `ou=Users`, `ou=Groups` and `ou=Disabled`. It cannot change anything else.
@@ -137,6 +165,8 @@ A past last day runs right away. A future one waits for the worker, which checks
 - API tokens and password links are random 256-bit values, stored only as SHA-256 hashes.
 - Password links give one generic error for wrong, used or expired links, so they can't be probed.
 - LDAP search filters and names are escaped against injection.
+- Separation of duties: nobody can approve their own access request, and admin rights always need both a manager and an IT agent.
+- The audit log is append-only. The API has no way to change it, and database triggers refuse any UPDATE or DELETE on it.
 
 ## API
 
@@ -150,6 +180,9 @@ A past last day runs right away. A future one waits for the worker, which checks
 | GET | `/api/inbox` | Signed in | Your messages (stands in for email in the demo) |
 | POST | `/api/password-resets/{token}` | Link holder | Set a new password (12+ characters, not containing your username) |
 | POST | `/api/automation/run-due` | Agent | Run due offboardings now instead of waiting for the worker |
+| GET | `/api/approvals` | Manager or agent | Requests waiting for your decision |
+| POST | `/api/approvals/{id}` | Approver | Approve, or reject with a reason |
+| GET | `/api/audit` | Agent | Audit log, newest first. Filter with `target`, `action`, `ticket_id`, `limit` |
 
 ## Run the tests
 
