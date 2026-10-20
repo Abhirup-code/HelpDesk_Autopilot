@@ -48,7 +48,7 @@ Routine account work takes most of the IT team's time, leaves no audit trail, an
 **Out of scope (version 1)**
 - Hardware ordering and asset management
 - Integration with a real Microsoft Entra ID tenant (LDAP stands in for it)
-- Email delivery (messages are written to a local outbox for the demo)
+- Email delivery (messages go to an in-app inbox for the demo)
 - Mobile app
 
 ## 5. Stakeholders

@@ -54,7 +54,7 @@ flowchart LR
 
 - [x] Requirements: BRD, user stories, process maps, SLA policy
 - [x] Ticket API with PostgreSQL and tests
-- [ ] Directory automation: onboarding, offboarding, password reset
+- [x] Directory automation: onboarding, offboarding, password reset
 - [ ] Manager approvals and audit log
 - [ ] Web portal with Playwright tests
 - [ ] CI pipeline with security scans
@@ -71,13 +71,14 @@ docker compose up --build -d
 docker compose exec api python -m app.seed
 ```
 
-The last command prints an API token for each demo user:
+The last command gives each demo user a directory account and prints their API token:
 
-| User | Role |
-|---|---|
-| emma, noah | Employee |
-| liam | Manager |
-| ava | IT agent |
+| User | Role | Department |
+|---|---|---|
+| emma | Employee | Finance |
+| noah | Employee | Engineering |
+| liam | Manager | Finance |
+| ava | IT agent | IT |
 
 Open http://127.0.0.1:8000/docs to try the API in your browser. Click **Authorize** and paste a token.
 
@@ -90,15 +91,63 @@ curl -X POST http://127.0.0.1:8000/api/tickets \
   -d '{"type":"password_reset","title":"Locked out of email","description":"MFA keeps failing"}'
 ```
 
-## API (so far)
+## What the automations do
+
+| Ticket type | Who can file it | What happens |
+|---|---|---|
+| `password_reset` | Anyone | A one-time link (15 minutes, works once) goes to your inbox. Ticket auto-resolves |
+| `new_hire` | Manager or IT | Directory account created with the department's groups. The manager gets the username and a 72-hour set-password link |
+| `offboarding` | Manager or IT | After the last day ends: all groups removed, password removed, account moved to `ou=Disabled` |
+| `access_request`, `hardware` | Anyone | Goes to the IT queue (approvals come in the next step) |
+
+Every directory change is written to the audit log. If an automation fails, completed steps are undone, the ticket moves to `in_progress` with the error, and IT picks it up.
+
+**Example: new hire** (as Liam)
+
+```json
+{
+  "type": "new_hire",
+  "title": "New financial analyst",
+  "description": "Starts next Monday",
+  "details": {"first_name": "Jane", "last_name": "Doe", "department": "Finance", "start_date": "2026-10-26"}
+}
+```
+
+Departments: Engineering, Finance, IT, Operations, Sales.
+
+**Example: offboarding** (as Liam)
+
+```json
+{
+  "type": "offboarding",
+  "title": "Noah's last day",
+  "description": "Moving to another company",
+  "details": {"username": "noah", "last_day": "2026-10-19"}
+}
+```
+
+A past last day runs right away. A future one waits for the worker, which checks every minute.
+
+## Security choices
+
+- The app signs in to the directory with a service account that can only manage `ou=Users`, `ou=Groups` and `ou=Disabled`. It cannot change anything else.
+- Passwords are set with the LDAP password modify operation, so the directory hashes them with Argon2id. The app never stores passwords.
+- API tokens and password links are random 256-bit values, stored only as SHA-256 hashes.
+- Password links give one generic error for wrong, used or expired links, so they can't be probed.
+- LDAP search filters and names are escaped against injection.
+
+## API
 
 | Method | Path | Who | What |
 |---|---|---|---|
 | GET | `/health` | Anyone | Health check |
-| POST | `/api/tickets` | Signed in | Create a ticket. Priority and due time follow the SLA policy |
+| POST | `/api/tickets` | Signed in | Create a ticket. Automations run right away |
 | GET | `/api/tickets` | Signed in | Employees see their own tickets, IT agents see all. Filter with `status`, `type`, `priority` |
 | GET | `/api/tickets/{id}` | Owner or agent | One ticket. Other people's tickets return 404 |
 | PATCH | `/api/tickets/{id}/status` | Agent | Change status. Resolving records the time |
+| GET | `/api/inbox` | Signed in | Your messages (stands in for email in the demo) |
+| POST | `/api/password-resets/{token}` | Link holder | Set a new password (12+ characters, not containing your username) |
+| POST | `/api/automation/run-due` | Agent | Run due offboardings now instead of waiting for the worker |
 
 ## Run the tests
 
@@ -109,7 +158,9 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-Tests use in-memory SQLite by default. Coverage below 90% fails the run.
+Tests use in-memory SQLite and an in-memory directory by default, plus an ldap3 mock LDAP server. Coverage below 90% fails the run.
+
+To also run the directory tests against the real OpenLDAP container, set `LDAP_TEST_URL` and `LDAP_TEST_BIND_PASSWORD`.
 
 ## Documentation
 
