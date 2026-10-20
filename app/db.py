@@ -22,7 +22,8 @@ def make_engine(url: str | None = None) -> Engine:
         if url in ("sqlite://", "sqlite:///:memory:"):
             kwargs["poolclass"] = StaticPool
         return create_engine(url, **kwargs)
-    return create_engine(url, pool_pre_ping=True)
+    # Keep every timestamp in UTC, whatever the server time zone is.
+    return create_engine(url, pool_pre_ping=True, connect_args={"options": "-c timezone=utc"})
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:
