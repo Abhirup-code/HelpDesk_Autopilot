@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models import Priority, Status, TicketType
-from app.policy import DEPARTMENTS, MIN_PASSWORD_LENGTH
+from app.policy import DEPARTMENTS, MIN_PASSWORD_LENGTH, REQUESTABLE_GROUPS
 
 NAME_PATTERN = r"^[A-Za-z][A-Za-z '\-]{0,63}$"
 USERNAME_PATTERN = r"^[a-z][a-z0-9]{1,31}$"
@@ -28,9 +28,16 @@ class OffboardingDetails(BaseModel):
     last_day: date
 
 
+class AccessRequestDetails(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    group: Literal[tuple(REQUESTABLE_GROUPS)]  # type: ignore[valid-type]
+
+
 DETAIL_MODELS: dict[TicketType, type[BaseModel]] = {
     TicketType.NEW_HIRE: NewHireDetails,
     TicketType.OFFBOARDING: OffboardingDetails,
+    TicketType.ACCESS_REQUEST: AccessRequestDetails,
 }
 
 
@@ -80,6 +87,29 @@ class TicketOut(BaseModel):
     sla_breached: bool
     details: dict
     automation_error: str | None
+
+
+class ApprovalDecision(BaseModel):
+    decision: Literal["approve", "reject"]
+    reason: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def reason_for_rejection(self) -> "ApprovalDecision":
+        if self.decision == "reject" and not (self.reason and self.reason.strip()):
+            raise ValueError("a reason is required to reject")
+        return self
+
+
+class AuditEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    at: datetime
+    actor: str
+    action: str
+    target: str
+    ticket_id: int | None
+    detail: str
 
 
 class PasswordResetRedeem(BaseModel):
