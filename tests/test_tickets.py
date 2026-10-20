@@ -64,7 +64,7 @@ def test_invalid_token_is_401(client):
 
 def test_employee_sees_only_own_tickets(client):
     create(client, who="emma")
-    create(client, who="liam", title="Need Tableau access", type="access_request")
+    create(client, who="liam", title="Need a new mouse")
     mine = client.get("/api/tickets", headers=auth("emma")).json()
     assert [t["title"] for t in mine] == ["Laptop will not charge"]
 
