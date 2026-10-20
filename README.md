@@ -1,5 +1,7 @@
 # HelpDesk Autopilot
 
+[![CI](https://github.com/Abhirup-code/HelpDesk_Autopilot/actions/workflows/ci.yml/badge.svg)](https://github.com/Abhirup-code/HelpDesk_Autopilot/actions/workflows/ci.yml)
+
 A self-service IT help desk that automates the most common tickets (new-hire setup, offboarding and password resets) against a company directory, with manager approvals, a full audit trail and a live SLA dashboard.
 
 > **Status:** in development. See the [roadmap](#roadmap).
