@@ -57,3 +57,16 @@ def init_db(engine: Engine) -> None:
         if conn.dialect.name == "postgresql":
             conn.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": SCHEMA_LOCK_ID})
         Base.metadata.create_all(conn)
+        if conn.dialect.name == "postgresql":
+            grant_dashboard_access(conn)
+
+
+# Tables the Grafana dashboard may read. Users, tokens and reset links stay private.
+DASHBOARD_TABLES = ("tickets", "audit_events")
+
+
+def grant_dashboard_access(conn) -> None:
+    """Let the read-only grafana_reader login (created by db/init) read report tables."""
+    exists = conn.execute(text("SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader'"))
+    if exists.first():
+        conn.execute(text(f"GRANT SELECT ON {', '.join(DASHBOARD_TABLES)} TO grafana_reader"))
