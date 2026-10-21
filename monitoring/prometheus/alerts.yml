@@ -1,0 +1,33 @@
+groups:
+  - name: helpdesk
+    rules:
+      - alert: HelpDeskApiDown
+        expr: up{job="helpdesk-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: The help desk API is not responding to Prometheus.
+
+      - alert: TicketsBreachingSla
+        expr: helpdesk_tickets_breached_open > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} open ticket(s) are past their SLA due time."
+
+      - alert: SlaComplianceLow
+        expr: helpdesk_sla_compliance_ratio < 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SLA compliance is {{ $value | humanizePercentage }}, below the 90% target."
+
+      - alert: AutomationFailing
+        expr: increase(helpdesk_audit_events_total{action="automation.failed"}[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: An automation failed in the last 15 minutes. Check tickets sent to IT.
