@@ -12,8 +12,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-helpdesk}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Copy .env.example to .env first}
       POSTGRES_DB: ${POSTGRES_DB:-helpdesk}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:?Add GRAFANA_DB_PASSWORD to .env (see .env.example)}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -53,6 +55,41 @@ services:
       ldap:
         condition: service_healthy
 
+  prometheus:
+    image: prom/prometheus:v3.13.4
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - promdata:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:13.2.4
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Add GRAFANA_ADMIN_PASSWORD to .env (see .env.example)}
+      # Anyone on this machine can view dashboards without signing in; editing needs admin.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/helpdesk-sla.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      POSTGRES_DB: ${POSTGRES_DB:-helpdesk}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+
 volumes:
   pgdata:
   ldapdata:
+  promdata:
+  grafanadata:

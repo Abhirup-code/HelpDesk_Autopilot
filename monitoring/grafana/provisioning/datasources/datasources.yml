@@ -1,0 +1,24 @@
+apiVersion: 1
+
+datasources:
+  # Ticket history and the audit log, read with a read-only login.
+  - name: HelpDesk DB
+    uid: helpdesk-db
+    type: grafana-postgresql-datasource
+    url: db:5432
+    user: grafana_reader
+    isDefault: true
+    jsonData:
+      database: $POSTGRES_DB
+      sslmode: disable
+      postgresVersion: 1700
+    secureJsonData:
+      password: $GRAFANA_DB_PASSWORD
+
+  # Live metrics scraped from the API.
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    url: http://prometheus:9090
+    jsonData:
+      timeInterval: 15s
