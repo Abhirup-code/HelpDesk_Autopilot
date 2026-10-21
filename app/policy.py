@@ -12,7 +12,18 @@ DEPARTMENT_GROUPS: dict[str, list[str]] = {
 }
 DEPARTMENTS = sorted(DEPARTMENT_GROUPS)
 
-# Groups that are never granted automatically (used by approvals in step 4).
+# Groups people can ask for with an access request.
+REQUESTABLE_GROUPS = [
+    "erp-users",
+    "finance-share",
+    "git-users",
+    "helpdesk-agents",
+    "it-admins",
+    "tableau-users",
+    "vpn-users",
+]
+
+# Groups that also need an IT agent's approval after the manager approves.
 PRIVILEGED_GROUPS = {"it-admins"}
 
 # How long password links stay valid.

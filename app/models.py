@@ -1,9 +1,9 @@
 """Database models."""
 
 import enum
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import DDL, JSON, DateTime, Enum, ForeignKey, Integer, String, Text, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -41,9 +41,13 @@ class Status(enum.StrEnum):
     WAITING_IT_APPROVAL = "waiting_it_approval"
     RESOLVED = "resolved"
     AUTO_RESOLVED = "auto_resolved"
+    REJECTED = "rejected"
 
 
-CLOSED_STATUSES = {Status.RESOLVED, Status.AUTO_RESOLVED}
+CLOSED_STATUSES = {Status.RESOLVED, Status.AUTO_RESOLVED, Status.REJECTED}
+
+# While a ticket waits for its manager, IT can't act, so the SLA clock stops.
+PAUSED_STATUSES = {Status.WAITING_APPROVAL}
 
 
 class User(Base):
@@ -76,6 +80,9 @@ class Ticket(Base):
     # Set when an automation fails, so IT can see why the ticket came to them.
     automation_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Set while the SLA clock is paused (waiting for a manager).
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     requester: Mapped[User] = relationship()
 
     def is_breached(self, now: datetime | None = None) -> bool:
@@ -83,7 +90,23 @@ class Ticket(Base):
         due = aware(self.due_at)
         if self.resolved_at is not None:
             return aware(self.resolved_at) > due
+        if self.paused_at is not None:
+            # The clock stopped when the pause began.
+            return aware(self.paused_at) > due
         return (now or utcnow()) > due
+
+    def set_status(self, status: "Status", now: datetime | None = None) -> None:
+        """Change status and keep the SLA clock and resolved time in step."""
+        now = now or utcnow()
+        if self.paused_at is not None and status not in PAUSED_STATUSES:
+            # Push the due time back by however long the ticket was paused.
+            paused_for: timedelta = now - aware(self.paused_at)
+            self.due_at = aware(self.due_at) + paused_for
+            self.paused_at = None
+        elif self.paused_at is None and status in PAUSED_STATUSES:
+            self.paused_at = now
+        self.status = status
+        self.resolved_at = now if status in CLOSED_STATUSES else None
 
 
 class AuditEvent(Base):
@@ -98,6 +121,34 @@ class AuditEvent(Base):
     target: Mapped[str] = mapped_column(String(128), index=True)
     ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
     detail: Mapped[str] = mapped_column(Text, default="")
+
+
+# The audit log is append-only at the database level too: any UPDATE or DELETE
+# fails, even from someone with direct database access through the app's account.
+event.listen(
+    AuditEvent.__table__,
+    "after_create",
+    DDL(
+        """
+        CREATE OR REPLACE FUNCTION audit_events_append_only() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'audit_events is append-only';
+        END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER audit_events_no_change BEFORE UPDATE OR DELETE ON audit_events
+            FOR EACH ROW EXECUTE FUNCTION audit_events_append_only();
+        """
+    ).execute_if(dialect="postgresql"),
+)
+for _op in ("UPDATE", "DELETE"):
+    event.listen(
+        AuditEvent.__table__,
+        "after_create",
+        DDL(
+            f"CREATE TRIGGER audit_events_no_{_op.lower()} BEFORE {_op} ON audit_events "
+            "BEGIN SELECT RAISE(ABORT, 'audit_events is append-only'); END"
+        ).execute_if(dialect="sqlite"),
+    )
 
 
 class ResetToken(Base):

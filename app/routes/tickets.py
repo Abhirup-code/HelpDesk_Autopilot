@@ -8,7 +8,7 @@ from app import sla
 from app.auth import require_agent
 from app.automation import Automator, today_utc
 from app.directory import Directory
-from app.models import CLOSED_STATUSES, Priority, Role, Status, Ticket, TicketType, User, utcnow
+from app.models import Priority, Role, Status, Ticket, TicketType, User, utcnow
 from app.schemas import ErrorOut, StatusUpdate, TicketCreate, TicketOut
 
 UNAUTHORIZED = {401: {"model": ErrorOut, "description": "Missing or invalid token"}}
@@ -125,8 +125,7 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
     ) -> TicketOut:
         require_agent(user)
         ticket = visible_ticket(ticket_id, user, session)
-        ticket.status = body.status
-        ticket.resolved_at = utcnow() if body.status in CLOSED_STATUSES else None
+        ticket.set_status(body.status)
         session.commit()
         return serialize(ticket)
 

@@ -24,7 +24,7 @@ from app.models import (
     User,
     utcnow,
 )
-from app.policy import DEPARTMENT_GROUPS, NEW_HIRE_LINK_TTL, RESET_LINK_TTL
+from app.policy import DEPARTMENT_GROUPS, NEW_HIRE_LINK_TTL, PRIVILEGED_GROUPS, RESET_LINK_TTL
 
 ACTOR = "autopilot"
 
@@ -56,10 +56,17 @@ class Automator:
 
     # -- helpers ------------------------------------------------------------
 
-    def audit(self, action: str, target: str, ticket: Ticket | None, detail: str = "") -> None:
+    def audit(
+        self,
+        action: str,
+        target: str,
+        ticket: Ticket | None,
+        detail: str = "",
+        actor: str = ACTOR,
+    ) -> None:
         self.session.add(
             AuditEvent(
-                actor=ACTOR,
+                actor=actor,
                 action=action,
                 target=target,
                 ticket_id=ticket.id if ticket else None,
@@ -83,13 +90,12 @@ class Automator:
     def notify(self, user: User, subject: str, body: str) -> None:
         self.session.add(InboxMessage(user_id=user.id, subject=subject, body=body))
 
-    def resolve(self, ticket: Ticket) -> None:
-        ticket.status = Status.AUTO_RESOLVED
-        ticket.resolved_at = utcnow()
+    def resolve(self, ticket: Ticket, status: Status = Status.AUTO_RESOLVED) -> None:
+        ticket.set_status(status)
         ticket.automation_error = None
 
     def fail(self, ticket: Ticket, error: Exception) -> None:
-        ticket.status = Status.IN_PROGRESS
+        ticket.set_status(Status.IN_PROGRESS)
         ticket.automation_error = str(error)
         self.audit("automation.failed", ticket.type.value, ticket, str(error))
 
@@ -99,6 +105,7 @@ class Automator:
         handlers = {
             TicketType.PASSWORD_RESET: self.password_reset,
             TicketType.NEW_HIRE: self.new_hire,
+            TicketType.ACCESS_REQUEST: self.access_request,
         }
         if ticket.type in handlers:
             self._run(handlers[ticket.type], ticket)
@@ -170,6 +177,9 @@ class Automator:
         ticket.details = {**d, "username": username}
         self.resolve(ticket)
 
+    def access_request(self, ticket: Ticket) -> None:
+        AccessFlow(self).start(ticket)
+
     def offboard(self, ticket: Ticket) -> None:
         username = ticket.details["username"]
         if self.directory.is_disabled(username):
@@ -187,6 +197,85 @@ class Automator:
             f"{', '.join(removed) or 'none'}.",
         )
         self.resolve(ticket)
+
+
+# -- access requests and approvals ---------------------------------------------
+
+
+class AccessFlow:
+    """Approval workflow for access requests.
+
+    Employee asks for a group -> their manager approves -> privileged groups
+    also need an IT agent -> the group is added. Anyone in the chain can reject.
+    """
+
+    def __init__(self, automator: "Automator") -> None:
+        self.a = automator
+
+    def start(self, ticket: Ticket) -> None:
+        user, group = ticket.requester, ticket.details["group"]
+        if not self.a.directory.user_exists(user.username):
+            raise DirectoryError(f"No directory account for {user.username}")
+        if group in self.a.directory.groups_of(user.username):
+            self.a.notify(user, f"You already have {group}", "No change was needed.")
+            self.a.resolve(ticket)
+            return
+        if user.manager_id is None:
+            # No manager on file, so IT decides.
+            ticket.set_status(Status.WAITING_IT_APPROVAL)
+            return
+        ticket.set_status(Status.WAITING_APPROVAL)
+        manager = self.a.session.get(User, user.manager_id)
+        self.a.notify(
+            manager,
+            f"Approval needed: {user.full_name} wants {group}",
+            f"Ticket #{ticket.id}: {ticket.description}\n\nApprove or reject at /api/approvals.",
+        )
+
+    def approve(self, ticket: Ticket, approver: User) -> None:
+        group = ticket.details["group"]
+        stage = "manager" if ticket.status == Status.WAITING_APPROVAL else "it"
+        self.a.audit(
+            f"approval.{stage}", ticket.requester.username, ticket, group, actor=approver.username
+        )
+        ticket.details = {**ticket.details, f"{stage}_approved_by": approver.username}
+        if stage == "manager" and group in PRIVILEGED_GROUPS:
+            ticket.set_status(Status.WAITING_IT_APPROVAL)
+            self.a.notify(
+                ticket.requester,
+                f"Manager approved {group}",
+                f"{group} is a privileged group, so IT must approve it as well.",
+            )
+            return
+        self.a._run(self.grant, ticket)
+
+    def grant(self, ticket: Ticket) -> None:
+        user, group = ticket.requester, ticket.details["group"]
+        self.a.directory.add_to_group(user.username, group)
+        self.a.audit("group.add", user.username, ticket, group)
+        self.a.notify(user, f"Access granted: {group}", f"You were added to {group}.")
+        self.a.resolve(ticket, Status.RESOLVED)
+
+    def reject(self, ticket: Ticket, approver: User, reason: str) -> None:
+        group = ticket.details["group"]
+        self.a.audit(
+            "approval.reject",
+            ticket.requester.username,
+            ticket,
+            f"{group}: {reason}",
+            actor=approver.username,
+        )
+        ticket.details = {
+            **ticket.details,
+            "rejected_by": approver.username,
+            "rejection_reason": reason,
+        }
+        ticket.set_status(Status.REJECTED)
+        self.a.notify(
+            ticket.requester,
+            f"Access request rejected: {group}",
+            f"{approver.full_name} rejected your request. Reason: {reason}",
+        )
 
 
 def today_utc() -> date:
