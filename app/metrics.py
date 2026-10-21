@@ -73,7 +73,7 @@ class TicketCollector(Collector):
                 resolved += 1
                 auto += t.status == Status.AUTO_RESOLVED
                 on_time += not t.is_breached()
-                seconds = (aware(t.resolved_at) - aware(t.created_at)).total_seconds()
+                seconds = max((aware(t.resolved_at) - t.work_start()).total_seconds(), 0.0)
                 durations.setdefault(t.type.value, []).append(seconds)
             else:
                 key = (t.type.value, t.status.value)
