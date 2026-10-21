@@ -10,7 +10,7 @@ import time
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.automation import Automator, today_utc
-from app.db import Base, make_engine, make_session_factory
+from app.db import init_db, make_engine, make_session_factory
 from app.directory import Directory, directory_from_env
 
 log = logging.getLogger("worker")
@@ -24,7 +24,7 @@ def run_once(factory: sessionmaker[Session], directory: Directory, base_url: str
 def main() -> None:  # pragma: no cover - long-running loop, run_once is tested
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     engine = make_engine()
-    Base.metadata.create_all(engine)
+    init_db(engine)
     factory = make_session_factory(engine)
     directory = directory_from_env()
     base_url = os.environ.get("PUBLIC_URL", "http://127.0.0.1:8000")

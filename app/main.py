@@ -5,7 +5,7 @@ import os
 from fastapi import FastAPI, Request, Response
 
 from app.auth import make_current_user
-from app.db import Base, make_engine, make_session_factory, session_dependency
+from app.db import init_db, make_engine, make_session_factory, session_dependency
 from app.directory import Directory, directory_from_env
 from app.routes import accounts, approvals, tickets
 
@@ -16,7 +16,7 @@ def create_app(
     base_url: str | None = None,
 ) -> FastAPI:
     engine = make_engine(database_url)
-    Base.metadata.create_all(engine)
+    init_db(engine)
     factory = make_session_factory(engine)
     get_session = session_dependency(factory)
     current_user = make_current_user(get_session)
