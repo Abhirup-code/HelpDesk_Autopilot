@@ -7,7 +7,7 @@ Run after the stack starts:
 from sqlalchemy import select
 
 from app.auth import hash_token, new_token
-from app.db import Base, make_engine, make_session_factory
+from app.db import init_db, make_engine, make_session_factory
 from app.directory import Directory, DirectoryError, InMemoryDirectory, directory_from_env
 from app.models import Role, User
 from app.policy import DEPARTMENT_GROUPS
@@ -36,7 +36,7 @@ def seed_directory(directory: Directory) -> list[str]:
 
 def seed(directory: Directory | None = None) -> dict[str, str]:
     engine = make_engine()
-    Base.metadata.create_all(engine)
+    init_db(engine)
     factory = make_session_factory(engine)
     tokens: dict[str, str] = {}
     with factory() as session:
