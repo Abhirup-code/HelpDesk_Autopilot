@@ -37,7 +37,7 @@ The SLA clock starts when a ticket is created and stops when it is resolved. Tim
 | Metric | Definition |
 |---|---|
 | Open tickets | Tickets not Resolved or Auto-resolved |
-| Median time to resolve | Median of (resolved time minus created time, minus paused time) |
+| Median time to resolve | Median of (resolved time minus the time work could start). Offboarding can start when the last day ends; access requests include manager wait time |
 | SLA compliance | Resolved within due time divided by all resolved |
 | Auto-resolve rate | Auto-resolved divided by all resolved |
 | Breaches | Tickets currently or ever marked Breached |

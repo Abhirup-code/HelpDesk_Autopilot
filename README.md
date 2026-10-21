@@ -60,7 +60,7 @@ flowchart LR
 - [x] Manager approvals and audit log
 - [ ] Web portal with Playwright tests
 - [ ] CI pipeline with security scans
-- [ ] Prometheus metrics and Grafana SLA dashboard
+- [x] Prometheus metrics and Grafana SLA dashboard
 - [ ] Demo data, screenshots and walkthrough
 
 ## Run it locally
@@ -92,6 +92,36 @@ curl -X POST http://127.0.0.1:8000/api/tickets \
   -H "Content-Type: application/json" \
   -d '{"type":"password_reset","title":"Locked out of email","description":"MFA keeps failing"}'
 ```
+
+## SLA dashboard
+
+After the stack is up and seeded, load 30 days of demo tickets:
+
+```bash
+docker compose exec api python -m app.demo
+```
+
+Then open:
+
+| What | Where |
+|---|---|
+| Grafana SLA dashboard | http://127.0.0.1:3000 (opens straight to the dashboard, no sign-in needed to view) |
+| Prometheus and alert rules | http://127.0.0.1:9090/alerts |
+| Raw metrics | http://127.0.0.1:8000/metrics |
+
+The dashboard shows:
+
+- **Right now:** open tickets, tickets breaching SLA, approvals waiting, SLA compliance, auto-resolve rate, median time to resolve
+- **Trends:** tickets per day by type, and SLA compliance per day against the 90% target
+- **Where the time goes:** median time to resolve by ticket type, and outcomes
+- **Live from Prometheus:** API requests per second, 95th percentile latency, alerts firing
+- **Audit trail:** the latest directory changes and approvals
+
+Grafana reads ticket history from PostgreSQL with a read-only login that can only see `tickets` and `audit_events`. Live numbers come from Prometheus, which scrapes the API every 15 seconds.
+
+**Alerts** (in `monitoring/prometheus/alerts.yml`, unit tested with promtool): API down, open tickets past their SLA, SLA compliance below 90%, and automation failures.
+
+Demo tickets follow the ticket mix from the BRD's 30-day review and are marked `"demo": true`. They never touch the directory.
 
 ## What the automations do
 
