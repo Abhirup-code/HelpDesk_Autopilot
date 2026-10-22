@@ -10,19 +10,22 @@ A self-service IT help desk that automates the most common tickets (new-hire set
 
 **SLA dashboard (Grafana):** live view of open tickets, SLA compliance, auto-resolve rate and trends over 30 days.
 
-![Grafana SLA dashboard](docs/images/dashboard.png)
+<img width="1462" height="821" alt="Screenshot 2026-10-22 at 1 55 37 AM" src="https://github.com/user-attachments/assets/411225f6-ad03-43a5-b4cc-77e6ebc31b0d" />
+
 
 **Alert rules (Prometheus):** fires when the API is down, tickets breach their SLA, compliance drops below 90%, or an automation fails.
 
-![Prometheus alert rules](docs/images/alerts.png)
+<img width="1462" height="821" alt="Screenshot 2026-10-22 at 1 56 14 AM" src="https://github.com/user-attachments/assets/506cebd4-9ffa-4a13-9aa1-dc28e3668258" />
+
 
 **Approvals:** admin rights need both the manager and IT, and nobody can approve their own request.
 
-![Approval flow](docs/images/approvals.png)
+<img width="580" height="370" alt="Screenshot 2026-10-22 at 1 58 44 AM" src="https://github.com/user-attachments/assets/86a84fd8-612b-42ac-afef-aa71c9819b26" />
+
 
 **Tamper-proof audit log:** the database itself refuses to delete audit records.
 
-![Audit log is append-only](docs/images/audit-log.png)
+<img width="580" height="370" alt="Screenshot 2026-10-22 at 1 58 09 AM" src="https://github.com/user-attachments/assets/325b2e4e-9470-4b85-ab71-9e11e7a85039" />
 
 ## The problem
 
