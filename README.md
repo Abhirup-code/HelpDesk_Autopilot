@@ -6,6 +6,24 @@ A self-service IT help desk that automates the most common tickets (new-hire set
 
 > **Status:** in development. See the [roadmap](#roadmap).
 
+## Screenshots
+
+**SLA dashboard (Grafana):** live view of open tickets, SLA compliance, auto-resolve rate and trends over 30 days.
+
+![Grafana SLA dashboard](docs/images/dashboard.png)
+
+**Alert rules (Prometheus):** fires when the API is down, tickets breach their SLA, compliance drops below 90%, or an automation fails.
+
+![Prometheus alert rules](docs/images/alerts.png)
+
+**Approvals:** admin rights need both the manager and IT, and nobody can approve their own request.
+
+![Approval flow](docs/images/approvals.png)
+
+**Tamper-proof audit log:** the database itself refuses to delete audit records.
+
+![Audit log is append-only](docs/images/audit-log.png)
+
 ## The problem
 
 At small and mid-size companies, one or two IT people handle every request by hand:
@@ -61,7 +79,7 @@ flowchart LR
 - [ ] Web portal with Playwright tests
 - [ ] CI pipeline with security scans
 - [x] Prometheus metrics and Grafana SLA dashboard
-- [ ] Demo data, screenshots and walkthrough
+- [x] Demo data, screenshots and walkthrough
 
 ## Run it locally
 
