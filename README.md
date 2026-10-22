@@ -80,7 +80,7 @@ flowchart LR
 - [x] Directory automation: onboarding, offboarding, password reset
 - [x] Manager approvals and audit log
 - [ ] Web portal with Playwright tests
-- [ ] CI pipeline with security scans
+- [x] CI pipeline with security scans
 - [x] Prometheus metrics and Grafana SLA dashboard
 - [x] Demo data, screenshots and walkthrough
 
@@ -218,6 +218,29 @@ While a request waits for the manager, the SLA clock is paused, because IT can't
 - LDAP search filters and names are escaped against injection.
 - Separation of duties: nobody can approve their own access request, and admin rights always need both a manager and an IT agent.
 - The audit log is append-only. The API has no way to change it, and database triggers refuse any UPDATE or DELETE on it.
+- Blocked attempts are logged too: trying to approve your own request leaves an `approval.denied` record.
+
+See [SECURITY.md](SECURITY.md) for the full list of controls.
+
+## CI pipeline
+
+Every pull request runs:
+
+| Check | What it does |
+|---|---|
+| Lint (ruff) | Style, bug and security rules |
+| Tests (sqlite), Tests (postgres) | 130+ tests with a 90% coverage gate, on both databases, including every dashboard query |
+| Monitoring config | promtool checks the Prometheus config and unit tests the alert rules |
+| Build and scan images | Builds both images, checks they run as non-root, and fails on fixable HIGH or CRITICAL vulnerabilities (Trivy) |
+| End-to-end (Docker Compose) | Starts the whole stack and tests password reset, new hire, approvals, self-approval block, audit log protection, Prometheus and Grafana |
+| Secret scanning (gitleaks) | Scans the full git history |
+| Dependency audit (pip-audit), Dependency review | Known vulnerabilities in Python packages |
+| CodeQL | Code security analysis for Python and the workflows |
+| Workflow lint (zizmor) | Security issues in GitHub Actions |
+
+Dependabot opens weekly update PRs for Python packages, Docker images and actions.
+
+Run the end-to-end test on your own machine with `scripts/e2e.sh`.
 
 ## API
 

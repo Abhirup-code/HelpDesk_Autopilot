@@ -202,6 +202,9 @@ def test_nobody_approves_their_own_request(client, app):
     response = decide(client, "ava", ticket_id, "approve")
     assert response.status_code == 403
     assert response.json()["detail"] == "You can't approve your own request"
+    assert ("ava", "approval.denied", "ava", "tried to approve own request for it-admins") in (
+        audit_rows(app)
+    )
 
     second_agent = add_user(app, "zoe", Role.AGENT)
     assert decide(client, None, ticket_id, "approve", headers=second_agent).json()["status"] == (

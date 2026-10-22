@@ -27,3 +27,13 @@ def test_worker_runs_due_offboardings(app, directory):
     assert worker.run_once(factory, directory, "http://test") == 1
     assert directory.is_disabled("emma")
     assert worker.run_once(factory, directory, "http://test") == 0
+
+
+def test_heartbeat_health_check(tmp_path):
+    heartbeat = tmp_path / "heartbeat"
+    assert not worker.is_healthy(heartbeat, interval=60)  # never ran yet
+    worker.beat(heartbeat)
+    assert worker.is_healthy(heartbeat, interval=60)
+    finished = heartbeat.stat().st_mtime
+    assert worker.is_healthy(heartbeat, interval=60, now=finished + 179)
+    assert not worker.is_healthy(heartbeat, interval=60, now=finished + 181)  # stuck worker

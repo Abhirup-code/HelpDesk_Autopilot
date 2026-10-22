@@ -1,5 +1,5 @@
 FROM alpine:3.22
-RUN apk add --no-cache openldap openldap-back-mdb openldap-passwd-argon2 openldap-clients \
+RUN apk upgrade --no-cache && apk add --no-cache openldap openldap-back-mdb openldap-passwd-argon2 openldap-clients \
     && mkdir -p /var/lib/openldap/data /run/openldap /etc/helpdesk-ldap \
     && chown -R ldap:ldap /var/lib/openldap /run/openldap
 COPY slapd.conf.template bootstrap.ldif.template /etc/helpdesk-ldap/

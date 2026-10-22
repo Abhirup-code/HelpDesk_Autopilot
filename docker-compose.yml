@@ -48,7 +48,12 @@ services:
     command: ["python", "-m", "app.worker"]
     environment: *app-env
     healthcheck:
-      disable: true
+      # Healthy only if the worker finished a run in the last 3 minutes.
+      test: ["CMD", "python", "-m", "app.worker", "--check"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       db:
         condition: service_healthy

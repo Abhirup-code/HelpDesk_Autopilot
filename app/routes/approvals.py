@@ -63,7 +63,18 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         if ticket is None or not can_decide(ticket, user):
             raise HTTPException(status.HTTP_404_NOT_FOUND, NO_PENDING)
         if ticket.requester_id == user.id:
-            # Separation of duties: nobody approves their own access.
+            # Separation of duties: nobody approves their own access. The attempt is
+            # logged, because security teams want to see who tried.
+            session.add(
+                AuditEvent(
+                    actor=user.username,
+                    action="approval.denied",
+                    target=user.username,
+                    ticket_id=ticket.id,
+                    detail=f"tried to {body.decision} own request for {ticket.details['group']}",
+                )
+            )
+            session.commit()
             raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't approve your own request")
         flow = AccessFlow(Automator(session, directory, base_url))
         if body.decision == "approve":
