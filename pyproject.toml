@@ -18,4 +18,5 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=app --cov-report=term-missing --cov-fail-under=90"
+addopts = "--cov=app --cov-report=term-missing --cov-fail-under=90 -m 'not ui'"
+markers = ["ui: browser tests with Playwright (run with -m ui --no-cov)"]
