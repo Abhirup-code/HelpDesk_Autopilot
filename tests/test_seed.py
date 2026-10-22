@@ -24,12 +24,22 @@ def test_seed_creates_users_and_rotates_tokens(tmp_path, monkeypatch):
         assert users["emma"].token_hash == hash_token(second["emma"])
 
 
-def test_seed_creates_directory_accounts_once(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/seed.db")
+def test_seed_directory_accounts_and_passwords():
     directory = InMemoryDirectory.with_default_groups()
 
-    seed_module.seed(directory)
+    first = seed_module.seed_directory(directory)
     assert directory.groups_of("noah") == ["all-staff", "git-users", "vpn-users"]
     assert directory.groups_of("ava") == ["all-staff", "helpdesk-agents"]
+    assert directory.authenticate("emma", first["emma"])
 
-    assert seed_module.seed_directory(directory) == []  # already there, nothing new
+    second = seed_module.seed_directory(directory)  # running again rotates passwords
+    assert second["emma"] != first["emma"]
+    assert not directory.authenticate("emma", first["emma"])
+    assert directory.groups_of("noah") == ["all-staff", "git-users", "vpn-users"]
+
+
+def test_seed_skips_offboarded_accounts():
+    directory = InMemoryDirectory.with_default_groups()
+    seed_module.seed_directory(directory)
+    directory.disable_user("noah")
+    assert "noah" not in seed_module.seed_directory(directory)

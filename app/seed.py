@@ -1,8 +1,10 @@
-"""Create demo users, give them directory accounts, and print their API tokens.
+"""Create demo users, give them directory accounts, and print tokens and passwords.
 
 Run after the stack starts:
     docker compose exec api python -m app.seed
 """
+
+import secrets
 
 from sqlalchemy import select
 
@@ -21,20 +23,28 @@ DEMO_USERS = [
 ]
 
 
-def seed_directory(directory: Directory) -> list[str]:
-    """Create directory accounts for demo users who don't have one yet."""
-    created = []
+def seed_directory(directory: Directory) -> dict[str, str]:
+    """Give each demo user an active directory account with a fresh portal password.
+
+    Returns the new passwords. Accounts that were offboarded in an earlier demo
+    are left alone, since disabled accounts can't sign in.
+    """
+    passwords: dict[str, str] = {}
     for username, first, last, department, _, _ in DEMO_USERS:
-        if directory.user_exists(username):
+        if not directory.user_exists(username):
+            directory.create_user(username, first, last, department)
+            for group in DEPARTMENT_GROUPS[department]:
+                directory.add_to_group(username, group)
+        if directory.is_disabled(username):
             continue
-        directory.create_user(username, first, last, department)
-        for group in DEPARTMENT_GROUPS[department]:
-            directory.add_to_group(username, group)
-        created.append(username)
-    return created
+        password = secrets.token_urlsafe(12)
+        directory.set_password(username, password)
+        passwords[username] = password
+    return passwords
 
 
 def seed(directory: Directory | None = None) -> dict[str, str]:
+    """Create demo portal users and return their API tokens."""
     engine = make_engine()
     init_db(engine)
     factory = make_session_factory(engine)
@@ -54,8 +64,6 @@ def seed(directory: Directory | None = None) -> dict[str, str]:
                 user.manager_id = boss.id if boss else None
             tokens[username] = token
         session.commit()
-    if directory is not None:
-        seed_directory(directory)
     return tokens
 
 
@@ -64,9 +72,14 @@ if __name__ == "__main__":  # pragma: no cover
     if isinstance(directory, InMemoryDirectory):
         print("LDAP_URL not set: skipping directory accounts")
         directory = None
-    try:
-        tokens = seed(directory)
-    except DirectoryError as exc:
-        raise SystemExit(f"Could not create directory accounts: {exc}") from exc
+    tokens = seed()
+    passwords: dict[str, str] = {}
+    if directory is not None:
+        try:
+            passwords = seed_directory(directory)
+        except DirectoryError as exc:
+            raise SystemExit(f"Could not create directory accounts: {exc}") from exc
+    # Columns: user, API token (for /docs and curl), portal password.
     for name, token in tokens.items():
-        print(f"{name:6} {token}")
+        print(f"{name:6} {token}  {passwords.get(name, '-')}")
+    print("\nSign in to the portal at http://127.0.0.1:8000 with a username and password above.")
