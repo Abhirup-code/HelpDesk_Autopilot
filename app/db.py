@@ -3,8 +3,9 @@
 import os
 import threading
 from collections.abc import Iterator
+from pathlib import Path
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -46,8 +47,29 @@ SCHEMA_LOCK_ID = 724_001
 _local_schema_lock = threading.Lock()
 
 
+MIGRATIONS = Path(__file__).resolve().parent / "migrations"
+# The revision that matches databases created before migrations were added.
+FIRST_REVISION = "0001"
+
+
+def run_migrations(conn) -> None:
+    """Bring the database schema up to date, keeping existing data."""
+    from alembic import command
+    from alembic.config import Config
+
+    config = Config()
+    config.set_main_option("script_location", str(MIGRATIONS))
+    config.attributes["connection"] = conn
+    tables = set(inspect(conn).get_table_names())
+    if "alembic_version" not in tables and "tickets" in tables:
+        # Built by an older version with create_all: record it as the first
+        # revision instead of trying to create the tables again.
+        command.stamp(config, FIRST_REVISION)
+    command.upgrade(config, "head")
+
+
 def init_db(engine: Engine) -> None:
-    """Create missing tables. Safe when several processes start at once.
+    """Create or upgrade the schema. Safe when several processes start at once.
 
     The api and worker containers start together. Without a lock, both try to
     create the same tables and one crashes. On PostgreSQL an advisory lock makes
@@ -56,7 +78,7 @@ def init_db(engine: Engine) -> None:
     with _local_schema_lock, engine.begin() as conn:
         if conn.dialect.name == "postgresql":
             conn.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": SCHEMA_LOCK_ID})
-        Base.metadata.create_all(conn)
+        run_migrations(conn)
         if conn.dialect.name == "postgresql":
             grant_dashboard_access(conn)
 
