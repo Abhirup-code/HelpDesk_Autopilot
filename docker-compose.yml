@@ -4,6 +4,8 @@ x-app-env: &app-env
   LDAP_BASE_DN: dc=example,dc=com
   LDAP_BIND_PASSWORD: ${LDAP_SERVICE_PASSWORD}
   PUBLIC_URL: http://127.0.0.1:8000
+  GRAFANA_URL: http://127.0.0.1:3000
+  PORTAL_SECRET_KEY: ${PORTAL_SECRET_KEY:?Add PORTAL_SECRET_KEY to .env (see .env.example)}
 
 services:
   db:

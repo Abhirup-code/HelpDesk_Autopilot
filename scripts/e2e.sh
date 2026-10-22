@@ -21,6 +21,18 @@ EMMA=$(token_for emma); LIAM=$(token_for liam); AVA=$(token_for ava)
 post() { curl -fsS -X POST "$API$1" -H "Authorization: Bearer $2" -H "Content-Type: application/json" -d "$3"; }
 field() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
 
+step "Portal sign-in checks the directory password"
+password_for() { awk -v u="$1" '$1 == u { print $3 }' <<<"$tokens"; }
+jar=$(mktemp)
+csrf=$(curl -fsS -c "$jar" "$API/login" | sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' | head -1)
+code=$(curl -s -o /dev/null -w '%{http_code}' -b "$jar" -c "$jar" -X POST "$API/login" \
+    --data-urlencode "username=emma" --data-urlencode "password=$(password_for emma)" \
+    --data-urlencode "csrf=$csrf" --data-urlencode "next=/tickets")
+[ "$code" = 303 ] || fail "portal sign-in returned $code"
+tickets_page=$(curl -fsS -b "$jar" "$API/tickets")
+contains "My tickets" "$tickets_page" || fail "tickets page not shown after sign-in"
+rm -f "$jar"
+
 step "Password reset resolves itself"
 status=$(post /api/tickets "$EMMA" '{"type":"password_reset","title":"Locked out","description":"MFA"}' | field '["status"]')
 [ "$status" = auto_resolved ] || fail "password reset status was $status"
