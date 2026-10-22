@@ -70,7 +70,7 @@ flowchart LR
 | Directory | OpenLDAP (stands in for Active Directory / Entra ID) |
 | Scripts | Python, PowerShell (bulk onboarding from CSV) |
 | Testing | pytest, Playwright, 90% coverage gate |
-| DevOps | Docker Compose, GitHub Actions, Trivy, CodeQL |
+| DevOps | Docker Compose, GitHub Actions, Alembic migrations, Trivy, CodeQL |
 | Monitoring | Prometheus, Grafana |
 
 ## Roadmap
@@ -113,6 +113,25 @@ curl -X POST http://127.0.0.1:8000/api/tickets \
   -H "Content-Type: application/json" \
   -d '{"type":"password_reset","title":"Locked out of email","description":"MFA keeps failing"}'
 ```
+
+## Upgrading
+
+Pull the latest code and rebuild. Your data stays:
+
+```bash
+git pull
+docker compose up --build -d
+```
+
+The API applies any new database migrations (Alembic) when it starts. Databases created by older versions of this project are picked up automatically.
+
+To change the schema, edit `app/models.py`, then create a migration:
+
+```bash
+DATABASE_URL=sqlite:///./dev.db alembic revision --autogenerate -m "describe the change"
+```
+
+A test fails if the models and migrations ever drift apart.
 
 ## SLA dashboard
 
