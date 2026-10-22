@@ -86,7 +86,7 @@ flowchart LR
 
 ## Web portal
 
-Open http://127.0.0.1:8000 and sign in with a username and password printed by the seed command. The password is checked against the company directory.
+Open the setup link the seed command printed for a user, choose a password, then sign in at http://127.0.0.1:8000. The password is checked against the company directory.
 
 | Who | What they see |
 |---|---|
@@ -108,7 +108,7 @@ docker compose up --build -d
 docker compose exec api python -m app.seed
 ```
 
-The last command gives each demo user a directory account and prints their API token and portal password:
+The last command gives each demo user a directory account and prints their API token and a one-time link (valid 72 hours) to choose their portal password. No password is ever printed:
 
 | User | Role | Department |
 |---|---|---|

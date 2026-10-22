@@ -24,13 +24,23 @@ EMMA=$(token_for emma); LIAM=$(token_for liam); AVA=$(token_for ava)
 post() { curl -fsS -X POST "$API$1" -H "Authorization: Bearer $2" -H "Content-Type: application/json" -d "$3"; }
 field() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
 
-step "Portal sign-in checks the directory password"
-password_for() { awk -v u="$1" '$1 == u { print $3 }' <<<"$tokens"; }
+step "New user sets a password with the setup link, then signs in"
+link_for() { awk -v u="$1" '$1 == u { print $3 }' <<<"$tokens"; }
+# First csrf token on a page (sed stops at the first match, so no broken pipe).
+csrf_from() { sed -n '/name="csrf"/{s/.*name="csrf" value="\([^"]*\)".*/\1/p;q;}' <<<"$1"; }
+link=$(link_for emma)
+[ -n "$link" ] || fail "seed did not print a setup link"
 jar=$(mktemp)
-csrf=$(curl -fsS -c "$jar" "$API/login" | sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' | head -1)
+chosen="e2e-chosen-password-1"
+page=$(curl -fsS -b "$jar" -c "$jar" "$link")
+code=$(curl -s -o /dev/null -w '%{http_code}' -b "$jar" -c "$jar" -X POST "$link" \
+    --data-urlencode "password=$chosen" --data-urlencode "confirm=$chosen" \
+    --data-urlencode "csrf=$(csrf_from "$page")")
+[ "$code" = 303 ] || fail "setting a password with the setup link returned $code"
+page=$(curl -fsS -b "$jar" -c "$jar" "$API/login")
 code=$(curl -s -o /dev/null -w '%{http_code}' -b "$jar" -c "$jar" -X POST "$API/login" \
-    --data-urlencode "username=emma" --data-urlencode "password=$(password_for emma)" \
-    --data-urlencode "csrf=$csrf" --data-urlencode "next=/tickets")
+    --data-urlencode "username=emma" --data-urlencode "password=$chosen" \
+    --data-urlencode "csrf=$(csrf_from "$page")" --data-urlencode "next=/tickets")
 [ "$code" = 303 ] || fail "portal sign-in returned $code"
 tickets_page=$(curl -fsS -b "$jar" "$API/tickets")
 contains "My tickets" "$tickets_page" || fail "tickets page not shown after sign-in"

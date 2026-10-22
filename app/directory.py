@@ -102,7 +102,7 @@ class InMemoryDirectory:
         if person.disabled:
             raise DirectoryError(f"Account is disabled: {username}")
         person.password_set = True
-        person.password_hash = _test_hash(password)
+        person.password_hash = _hash_password(password)
 
     def disable_user(self, username: str) -> None:
         person = self._person(username)
@@ -117,12 +117,19 @@ class InMemoryDirectory:
         person = self.people.get(username)
         if person is None or person.disabled or person.password_hash is None:
             return False
-        return hmac.compare_digest(person.password_hash, _test_hash(password))
+        return _password_matches(person.password_hash, password)
 
 
-def _test_hash(password: str) -> str:
-    # Only for the in-memory test directory. The real directory hashes with Argon2id.
-    return hashlib.sha256(password.encode()).hexdigest()
+def _hash_password(password: str, salt: bytes | None = None) -> str:
+    """scrypt hash for the in-memory directory (the real directory uses Argon2id)."""
+    salt = salt or os.urandom(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1, dklen=32)
+    return f"{salt.hex()}${digest.hex()}"
+
+
+def _password_matches(stored: str, password: str) -> bool:
+    salt_hex, _ = stored.split("$", 1)
+    return hmac.compare_digest(stored, _hash_password(password, bytes.fromhex(salt_hex)))
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ import re
 import secrets
 import time
 from collections import defaultdict
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
@@ -97,11 +97,21 @@ class LoginThrottle:
         self.failures.pop(username, None)
 
 
+# Pages people may be sent back to after signing in. The redirect is always
+# rebuilt from this list, never taken from the request, so it can't point
+# anywhere else.
+RETURN_PAGES = ("/tickets/new", "/tickets", "/approvals", "/inbox", "/audit")
+TICKET_PAGE = re.compile(r"^/tickets/(\d{1,9})$")
+
+
 def safe_next(target: str | None) -> str:
-    # Only allow redirects within this site, never to another host.
-    if target and target.startswith("/") and not target.startswith("//"):
-        if not urlparse(target).netloc:
-            return target
+    target = target or ""
+    for page in RETURN_PAGES:
+        if target == page:
+            return page
+    match = TICKET_PAGE.match(target)
+    if match:
+        return f"/tickets/{int(match.group(1))}"
     return "/tickets"
 
 
@@ -173,7 +183,8 @@ def install_portal(
 
     def error_page(request: Request, user: User | None, exc: HTTPException) -> Response:
         if exc.status_code == 401:
-            return go(f"/login?next={quote(request.url.path)}")
+            # Only known portal pages go into the link, never raw request text.
+            return go(f"/login?next={quote(safe_next(request.url.path))}")
         message = exc.detail if isinstance(exc.detail, str) else "Something went wrong."
         return render(request, "error.html", exc.status_code, user=user, message=message)
 

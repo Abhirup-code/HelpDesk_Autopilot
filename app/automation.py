@@ -48,6 +48,31 @@ def describe(ttl: timedelta) -> str:
     return f"{minutes} minutes" if minutes < 120 else f"{minutes // 60} hours"
 
 
+def issue_password_link(
+    session: Session, username: str, base_url: str, ttl: timedelta, ticket: Ticket | None = None
+) -> str:
+    """Create a single-use link to set a directory password. Only its hash is stored."""
+    token = secrets.token_urlsafe(32)
+    session.add(
+        ResetToken(
+            token_hash=hash_token(token),
+            username=username,
+            ticket_id=ticket.id if ticket else None,
+            expires_at=utcnow() + ttl,
+        )
+    )
+    session.add(
+        AuditEvent(
+            actor=ACTOR,
+            action="password_link.issue",
+            target=username,
+            ticket_id=ticket.id if ticket else None,
+            detail=f"valid for {describe(ttl)}",
+        )
+    )
+    return f"{base_url.rstrip('/')}/reset/{token}"
+
+
 class Automator:
     def __init__(self, session: Session, directory: Directory, base_url: str) -> None:
         self.session = session
@@ -74,18 +99,8 @@ class Automator:
             )
         )
 
-    def issue_link(self, username: str, ticket: Ticket, ttl: timedelta) -> str:
-        token = secrets.token_urlsafe(32)
-        self.session.add(
-            ResetToken(
-                token_hash=hash_token(token),
-                username=username,
-                ticket_id=ticket.id,
-                expires_at=utcnow() + ttl,
-            )
-        )
-        self.audit("password_link.issue", username, ticket, f"valid for {describe(ttl)}")
-        return f"{self.base_url}/reset/{token}"
+    def issue_link(self, username: str, ticket: Ticket | None, ttl: timedelta) -> str:
+        return issue_password_link(self.session, username, self.base_url, ttl, ticket)
 
     def notify(self, user: User, subject: str, body: str) -> None:
         self.session.add(InboxMessage(user_id=user.id, subject=subject, body=body))

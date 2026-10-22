@@ -98,6 +98,10 @@ def test_repeated_wrong_passwords_lock_the_account(portal, app):
     ("target", "expected"),
     [
         ("/inbox", "/inbox"),
+        ("/tickets/new", "/tickets/new"),
+        ("/tickets/42", "/tickets/42"),
+        ("/tickets/42/../../evil", "/tickets"),
+        ("/tickets?x=https://evil.example", "/tickets"),
         ("//evil.example", "/tickets"),
         ("https://evil.example/x", "/tickets"),
         (None, "/tickets"),
