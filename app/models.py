@@ -1,12 +1,23 @@
 """Database models."""
 
 import enum
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy import DDL, JSON, DateTime, Enum, ForeignKey, Integer, String, Text, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+
+
+def str_enum(enum_class: type[enum.Enum]) -> Enum:
+    """Store the readable value ("auto_resolved"), not the Python name ("AUTO_RESOLVED"),
+    so SQL reports and dashboards match what the API shows."""
+    return Enum(
+        enum_class,
+        native_enum=False,
+        values_callable=lambda members: [m.value for m in members],
+        validate_strings=True,
+    )
 
 
 def utcnow() -> datetime:
@@ -57,7 +68,7 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(128))
     department: Mapped[str] = mapped_column(String(64))
-    role: Mapped[Role] = mapped_column(Enum(Role, native_enum=False), default=Role.EMPLOYEE)
+    role: Mapped[Role] = mapped_column(str_enum(Role), default=Role.EMPLOYEE)
     manager_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
 
@@ -66,9 +77,9 @@ class Ticket(Base):
     __tablename__ = "tickets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    type: Mapped[TicketType] = mapped_column(Enum(TicketType, native_enum=False))
-    priority: Mapped[Priority] = mapped_column(Enum(Priority, native_enum=False))
-    status: Mapped[Status] = mapped_column(Enum(Status, native_enum=False), default=Status.NEW)
+    type: Mapped[TicketType] = mapped_column(str_enum(TicketType))
+    priority: Mapped[Priority] = mapped_column(str_enum(Priority))
+    status: Mapped[Status] = mapped_column(str_enum(Status), default=Status.NEW)
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text)
     requester_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
@@ -94,6 +105,19 @@ class Ticket(Base):
             # The clock stopped when the pause began.
             return aware(self.paused_at) > due
         return (now or utcnow()) > due
+
+    def work_start(self) -> datetime:
+        """When work on the ticket could begin.
+
+        Offboarding is filed ahead of time but can only run after the last day
+        ends, so resolution time is measured from then.
+        """
+        created = aware(self.created_at)
+        if self.type == TicketType.OFFBOARDING and self.details.get("last_day"):
+            last_day = date.fromisoformat(self.details["last_day"])
+            day_after = datetime.combine(last_day + timedelta(days=1), time.min, tzinfo=UTC)
+            return max(created, day_after)
+        return created
 
     def set_status(self, status: "Status", now: datetime | None = None) -> None:
         """Change status and keep the SLA clock and resolved time in step."""

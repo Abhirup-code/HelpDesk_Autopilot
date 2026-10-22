@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, Response
 from app.auth import make_current_user
 from app.db import init_db, make_engine, make_session_factory, session_dependency
 from app.directory import Directory, directory_from_env
+from app.metrics import install_metrics
 from app.routes import accounts, approvals, tickets
 
 
@@ -23,7 +24,7 @@ def create_app(
     directory = directory if directory is not None else directory_from_env()
     base_url = base_url or os.environ.get("PUBLIC_URL", "http://127.0.0.1:8000")
 
-    app = FastAPI(title="HelpDesk Autopilot", version="0.3.0")
+    app = FastAPI(title="HelpDesk Autopilot", version="0.4.0")
     app.state.session_factory = factory
     app.state.directory = directory
 
@@ -35,6 +36,8 @@ def create_app(
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    install_metrics(app, factory)
 
     @app.get("/health")
     def health() -> dict[str, str]:

@@ -71,3 +71,25 @@ def test_resolved_on_time_is_not_breached():
 def test_naive_datetimes_are_treated_as_utc():
     naive_due = datetime(2026, 10, 19, 10, 0)
     assert _ticket(naive_due).is_breached(now=FRI_4PM)
+
+
+def test_offboarding_work_starts_when_last_day_ends():
+    filed_early = Ticket(
+        type=TicketType.OFFBOARDING,
+        created_at=MON_10AM,
+        details={"username": "emma", "last_day": "2026-10-23"},
+    )
+    assert filed_early.work_start() == datetime(2026, 10, 24, 0, 0, tzinfo=UTC)
+
+    filed_late = Ticket(
+        type=TicketType.OFFBOARDING,
+        created_at=FRI_4PM,
+        details={"username": "emma", "last_day": "2026-10-19"},
+    )
+    assert filed_late.work_start() == FRI_4PM
+
+
+def test_other_tickets_start_when_created():
+    assert Ticket(type=TicketType.HARDWARE, created_at=MON_10AM, details={}).work_start() == (
+        MON_10AM
+    )

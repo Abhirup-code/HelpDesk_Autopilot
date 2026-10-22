@@ -1,0 +1,44 @@
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="helpdesk-api"}'
+        values: "1 0 0 0"
+      - series: "helpdesk_tickets_breached_open"
+        values: "0 2 2 2 2 2 2 2"
+      - series: "helpdesk_sla_compliance_ratio"
+        values: "0.95x5 0.85x12"
+      - series: 'helpdesk_audit_events_total{action="automation.failed"}'
+        values: "1 1 2"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: HelpDeskApiDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: helpdesk-api}
+            exp_annotations:
+              summary: The help desk API is not responding to Prometheus.
+      - eval_time: 7m
+        alertname: TicketsBreachingSla
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "2 open ticket(s) are past their SLA due time."
+      - eval_time: 3m
+        alertname: TicketsBreachingSla
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: SlaComplianceLow
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "SLA compliance is 85%, below the 90% target."
+      - eval_time: 2m
+        alertname: AutomationFailing
+        exp_alerts:
+          - exp_labels: {severity: warning, action: automation.failed}
+            exp_annotations:
+              summary: An automation failed in the last 15 minutes. Check tickets sent to IT.
