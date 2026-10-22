@@ -66,10 +66,10 @@ flowchart LR
 
 | Area | Tools |
 |---|---|
-| App | Python, FastAPI, PostgreSQL |
+| App | Python, FastAPI, PostgreSQL, Jinja2 web portal |
 | Directory | OpenLDAP (stands in for Active Directory / Entra ID) |
 | Scripts | Python, PowerShell (bulk onboarding from CSV) |
-| Testing | pytest, Playwright, 90% coverage gate |
+| Testing | pytest, Playwright browser tests, 90% coverage gate |
 | DevOps | Docker Compose, GitHub Actions, Alembic migrations, Trivy, CodeQL |
 | Monitoring | Prometheus, Grafana |
 
@@ -79,10 +79,24 @@ flowchart LR
 - [x] Ticket API with PostgreSQL and tests
 - [x] Directory automation: onboarding, offboarding, password reset
 - [x] Manager approvals and audit log
-- [ ] Web portal with Playwright tests
+- [x] Web portal with Playwright tests
 - [x] CI pipeline with security scans
 - [x] Prometheus metrics and Grafana SLA dashboard
 - [x] Demo data, screenshots and walkthrough
+
+## Web portal
+
+Open http://127.0.0.1:8000 and sign in with a username and password printed by the seed command. The password is checked against the company directory.
+
+| Who | What they see |
+|---|---|
+| Employee | My tickets, new requests (password reset, access, hardware), inbox with reset links |
+| Manager | Everything above, plus approvals for their team and new hire / offboarding requests |
+| IT agent | The whole queue, status changes, second approval for admin rights, the audit log, and a link to the Grafana dashboard |
+
+Portal security: directory sign-in, signed session cookies, a CSRF token on every form, a lockout after 5 wrong passwords (logged as `signin.locked`), sign-in redirects that can't leave the site, and a strict Content-Security-Policy with no inline scripts.
+
+The same rules back the API and the portal (`app/services.py`), so the two can't drift apart.
 
 ## Run it locally
 
@@ -94,7 +108,7 @@ docker compose up --build -d
 docker compose exec api python -m app.seed
 ```
 
-The last command gives each demo user a directory account and prints their API token:
+The last command gives each demo user a directory account and prints their API token and portal password:
 
 | User | Role | Department |
 |---|---|---|
@@ -103,7 +117,7 @@ The last command gives each demo user a directory account and prints their API t
 | liam | Manager | Finance |
 | ava | IT agent | IT |
 
-Open http://127.0.0.1:8000/docs to try the API in your browser. Click **Authorize** and paste a token.
+Open http://127.0.0.1:8000 to use the web portal, or http://127.0.0.1:8000/docs to try the API: click **Authorize** and paste a token.
 
 Or use curl:
 
@@ -251,7 +265,8 @@ Every pull request runs:
 | Tests (sqlite), Tests (postgres) | 130+ tests with a 90% coverage gate, on both databases, including every dashboard query |
 | Monitoring config | promtool checks the Prometheus config and unit tests the alert rules |
 | Build and scan images | Builds both images, checks they run as non-root, and fails on fixable HIGH or CRITICAL vulnerabilities (Trivy) |
-| End-to-end (Docker Compose) | Starts the whole stack and tests password reset, new hire, approvals, self-approval block, audit log protection, Prometheus and Grafana |
+| UI tests (Playwright) | Real Chromium clicks through password reset, approvals, the request form and IT views; screenshots are kept as build artifacts |
+| End-to-end (Docker Compose) | Starts the whole stack and tests portal sign-in, password reset, new hire, approvals, self-approval block, audit log protection, Prometheus and Grafana |
 | Secret scanning (gitleaks) | Scans the full git history |
 | Dependency audit (pip-audit), Dependency review | Known vulnerabilities in Python packages |
 | CodeQL | Code security analysis for Python and the workflows |
@@ -284,6 +299,12 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 python -m pytest
+```
+
+Browser tests (need Chromium once: `python -m playwright install chromium`):
+
+```bash
+python -m pytest -m ui --no-cov
 ```
 
 Tests use in-memory SQLite and an in-memory directory by default, plus an ldap3 mock LDAP server. Coverage below 90% fails the run.
