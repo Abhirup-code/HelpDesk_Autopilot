@@ -3,8 +3,8 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import pytest
 from sqlalchemy import inspect, text
 
-from app.db import Base, init_db, make_engine
-from tests.conftest import TEST_DB
+from app.db import init_db, make_engine
+from tests.conftest import TEST_DB, drop_everything
 
 
 def _start_process(url: str) -> None:
@@ -19,7 +19,7 @@ def test_init_db_is_safe_when_processes_start_together(tmp_path):
         url, pool = TEST_DB, ProcessPoolExecutor(max_workers=4)
     else:
         url, pool = f"sqlite:///{tmp_path}/race.db", ThreadPoolExecutor(max_workers=4)
-    Base.metadata.drop_all(make_engine(url))
+    drop_everything(make_engine(url))
 
     with pool:
         list(pool.map(_start_process, [url] * 4))  # re-raises any crash
@@ -42,7 +42,7 @@ def test_dashboard_login_reads_only_report_tables():
         exists = conn.execute(text("SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader'"))
         if not exists.first():
             conn.execute(text("CREATE ROLE grafana_reader LOGIN PASSWORD 'test-only'"))
-    Base.metadata.drop_all(engine)
+    drop_everything(engine)
     init_db(engine)
 
     def can_read(table):
