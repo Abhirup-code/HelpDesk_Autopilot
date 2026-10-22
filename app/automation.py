@@ -85,7 +85,7 @@ class Automator:
             )
         )
         self.audit("password_link.issue", username, ticket, f"valid for {describe(ttl)}")
-        return f"{self.base_url}/api/password-resets/{token}"
+        return f"{self.base_url}/reset/{token}"
 
     def notify(self, user: User, subject: str, body: str) -> None:
         self.session.add(InboxMessage(user_id=user.id, subject=subject, body=body))
@@ -144,8 +144,7 @@ class Automator:
         self.notify(
             user,
             "Your password reset link",
-            f"Use this link within 15 minutes to set a new password. It works once.\n\n"
-            f"POST your new password to:\n{link}",
+            f"Open this link within 15 minutes to set a new password. It works once.\n\n{link}",
         )
         self.resolve(ticket)
 

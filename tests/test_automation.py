@@ -27,7 +27,7 @@ def inbox(client, who):
 
 
 def link_token(message_body: str) -> str:
-    return message_body.rsplit("/api/password-resets/", 1)[1].strip()
+    return message_body.rsplit("/reset/", 1)[1].strip()
 
 
 # -- usernames ----------------------------------------------------------------
@@ -57,7 +57,7 @@ def test_password_reset_auto_resolves_and_sends_link(client, app):
     messages = inbox(client, "emma")
     assert len(messages) == 1
     assert "15 minutes" in messages[0]["body"]
-    assert "http://test/api/password-resets/" in messages[0]["body"]
+    assert "http://test/reset/" in messages[0]["body"]
     assert inbox(client, "liam") == []  # nobody else sees it
 
     assert ("password_link.issue", "emma", "valid for 15 minutes") in audit(app)
