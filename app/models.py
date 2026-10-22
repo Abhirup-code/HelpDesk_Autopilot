@@ -3,7 +3,7 @@
 import enum
 from datetime import UTC, date, datetime, time, timedelta
 
-from sqlalchemy import DDL, JSON, DateTime, Enum, ForeignKey, Integer, String, Text, event
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -147,32 +147,8 @@ class AuditEvent(Base):
     detail: Mapped[str] = mapped_column(Text, default="")
 
 
-# The audit log is append-only at the database level too: any UPDATE or DELETE
-# fails, even from someone with direct database access through the app's account.
-event.listen(
-    AuditEvent.__table__,
-    "after_create",
-    DDL(
-        """
-        CREATE OR REPLACE FUNCTION audit_events_append_only() RETURNS trigger AS $$
-        BEGIN
-            RAISE EXCEPTION 'audit_events is append-only';
-        END;
-        $$ LANGUAGE plpgsql;
-        CREATE TRIGGER audit_events_no_change BEFORE UPDATE OR DELETE ON audit_events
-            FOR EACH ROW EXECUTE FUNCTION audit_events_append_only();
-        """
-    ).execute_if(dialect="postgresql"),
-)
-for _op in ("UPDATE", "DELETE"):
-    event.listen(
-        AuditEvent.__table__,
-        "after_create",
-        DDL(
-            f"CREATE TRIGGER audit_events_no_{_op.lower()} BEFORE {_op} ON audit_events "
-            "BEGIN SELECT RAISE(ABORT, 'audit_events is append-only'); END"
-        ).execute_if(dialect="sqlite"),
-    )
+# Append-only triggers for audit_events are created by the first migration
+# (app/migrations/versions/0001_initial_schema.py).
 
 
 class ResetToken(Base):

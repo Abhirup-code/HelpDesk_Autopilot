@@ -2,6 +2,7 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from app.auth import hash_token
 from app.db import Base, make_engine
@@ -13,6 +14,13 @@ TOKENS = {"emma": "emma-token", "liam": "liam-token", "ava": "ava-token"}
 
 # Set TEST_DATABASE_URL to run the suite against PostgreSQL instead of in-memory SQLite.
 TEST_DB = os.environ.get("TEST_DATABASE_URL", "sqlite://")
+
+
+def drop_everything(engine) -> None:
+    """Remove all tables, including Alembic's version record, for a clean start."""
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+    Base.metadata.drop_all(engine)
 
 
 @pytest.fixture
@@ -31,7 +39,7 @@ def directory():
 @pytest.fixture
 def app(directory):
     if TEST_DB != "sqlite://":
-        Base.metadata.drop_all(make_engine(TEST_DB))
+        drop_everything(make_engine(TEST_DB))
     app = create_app(TEST_DB, directory=directory, base_url="http://test")
     with app.state.session_factory() as session:
         manager = User(
