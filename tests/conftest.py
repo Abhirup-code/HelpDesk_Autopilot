@@ -16,6 +16,16 @@ TOKENS = {"emma": "emma-token", "liam": "liam-token", "ava": "ava-token"}
 TEST_DB = os.environ.get("TEST_DATABASE_URL", "sqlite://")
 
 
+@pytest.fixture(autouse=True)
+def close_database_pools():
+    """Close every connection pool a test opened, so PostgreSQL doesn't run out."""
+    yield
+    from app.db import ENGINES
+
+    for engine in list(ENGINES):
+        engine.dispose()
+
+
 def drop_everything(engine) -> None:
     """Remove all tables, including Alembic's version record, for a clean start."""
     with engine.begin() as conn:
