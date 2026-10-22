@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Tickets · HelpDesk Autopilot{% endblock %}
+{% block content %}
+<div class="heading">
+  <h1>{% if user.role.value == "agent" %}IT queue{% else %}My tickets{% endif %}</h1>
+  <a class="button" href="/tickets/new">New request</a>
+</div>
+<p class="tabs">
+  <a href="/tickets?show=open" {% if show == "open" %}aria-current="page"{% endif %}>Open</a>
+  <a href="/tickets?show=all" {% if show == "all" %}aria-current="page"{% endif %}>All</a>
+</p>
+{% if tickets %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>#</th><th>Title</th><th>Type</th><th>Priority</th><th>Status</th><th>Due</th></tr></thead>
+  <tbody>
+  {% for t in tickets %}
+  <tr>
+    <td class="num">{{ t.id }}</td>
+    <td><a href="/tickets/{{ t.id }}">{{ t.title }}</a></td>
+    <td>{{ TYPE_LABELS[t.type.value] }}</td>
+    <td><span class="prio prio-{{ t.priority.value }}">{{ t.priority.value }}</span></td>
+    <td><span class="pill s-{{ t.status.value }}">{{ STATUS_LABELS[t.status.value] }}</span></td>
+    <td>{{ t.due_at | when }}{% if t.is_breached() %} <span class="late">Late</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty">Nothing here. <a href="/tickets/new">Create a request</a>.</p>
+{% endif %}
+{% endblock %}

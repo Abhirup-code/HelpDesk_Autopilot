@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}HelpDesk Autopilot{% endblock %}</title>
+  <link rel="stylesheet" href="/static/portal.css">
+  <script src="/static/portal.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">HelpDesk <span>Autopilot</span></a>
+    {% if user %}
+    <nav aria-label="Main">
+      {% for href, label in nav %}
+      <a href="{{ href }}" {% if request.url.path == href %}aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+      {% if user.role.value == "agent" %}<a href="{{ grafana_url }}" target="_blank" rel="noopener">Dashboard ↗</a>{% endif %}
+    </nav>
+    <div class="who">
+      <span class="chip">{{ user.full_name }} · {{ user.role.value }}</span>
+      <form method="post" action="/logout">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="link" type="submit">Sign out</button>
+      </form>
+    </div>
+    {% endif %}
+  </header>
+  <main>
+    {% if flash %}<p class="flash" role="status">{{ flash }}</p>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

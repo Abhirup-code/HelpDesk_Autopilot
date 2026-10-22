@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Problem · HelpDesk Autopilot{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{% if status_code == 404 %}Not found{% elif status_code == 403 %}Not allowed{% else %}Something's wrong{% endif %}</h1>
+  <p>{{ message }}</p>
+  <p><a href="/">Go to the start</a></p>
+</section>
+{% endblock %}

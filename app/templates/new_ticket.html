@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}New request · HelpDesk Autopilot{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>New request</h1>
+  {% if errors %}
+  <div class="error" role="alert"><p>Please fix this:</p><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+  {% endif %}
+  <form method="post" action="/tickets/new" class="stack" id="new-ticket">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>What do you need?
+      <select name="type" id="type" required>
+        {% for t in types %}<option value="{{ t }}" {% if form.get('type') == t %}selected{% endif %}>{{ TYPE_LABELS[t] }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Title <input name="title" required minlength="3" maxlength="200" value="{{ form.get('title', '') }}"></label>
+    <label>Description <textarea name="description" required rows="3" maxlength="5000">{{ form.get('description', '') }}</textarea></label>
+
+    <fieldset data-for="access_request">
+      <legend>Access</legend>
+      <label>Group
+        <select name="group">{% for g in groups %}<option {% if form.get('group') == g %}selected{% endif %}>{{ g }}</option>{% endfor %}</select>
+      </label>
+      <p class="hint">Your manager approves this. <strong>it-admins</strong> also needs IT.</p>
+    </fieldset>
+
+    <fieldset data-for="new_hire">
+      <legend>New hire</legend>
+      <div class="row">
+        <label>First name <input name="first_name" value="{{ form.get('first_name', '') }}"></label>
+        <label>Last name <input name="last_name" value="{{ form.get('last_name', '') }}"></label>
+      </div>
+      <div class="row">
+        <label>Department
+          <select name="department">{% for d in departments %}<option {% if form.get('department') == d %}selected{% endif %}>{{ d }}</option>{% endfor %}</select>
+        </label>
+        <label>Start date <input type="date" name="start_date" value="{{ form.get('start_date', '') }}" min="{{ today }}"></label>
+      </div>
+      <p class="hint">The account and department groups are created right away.</p>
+    </fieldset>
+
+    <fieldset data-for="offboarding">
+      <legend>Offboarding</legend>
+      <div class="row">
+        <label>Username <input name="username" value="{{ form.get('username', '') }}"></label>
+        <label>Last day <input type="date" name="last_day" value="{{ form.get('last_day', '') }}"></label>
+      </div>
+      <p class="hint">Access is removed when the last day ends.</p>
+    </fieldset>
+
+    <button type="submit">Submit request</button>
+  </form>
+</section>
+{% endblock %}

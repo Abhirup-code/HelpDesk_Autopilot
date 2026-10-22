@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Approvals · HelpDesk Autopilot{% endblock %}
+{% block content %}
+<h1>Waiting for you</h1>
+{% if pending %}
+{% for t in pending %}
+<section class="card approval">
+  <div class="heading">
+    <h2><a href="/tickets/{{ t.id }}">#{{ t.id }}</a> {{ t.requester.full_name }} wants <code>{{ t.details.group }}</code></h2>
+    <span class="pill s-{{ t.status.value }}">{{ STATUS_LABELS[t.status.value] }}</span>
+  </div>
+  <p>{{ t.description }}</p>
+  {% if t.details.get('manager_approved_by') %}<p class="hint">Manager {{ t.details.manager_approved_by }} approved. This is a privileged group, so IT decides too.</p>{% endif %}
+  <div class="actions">
+    <form method="post" action="/approvals/{{ t.id }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="decision" value="approve">
+      <button type="submit">Approve</button>
+    </form>
+    <form method="post" action="/approvals/{{ t.id }}" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="decision" value="reject">
+      <label class="sr-only" for="reason-{{ t.id }}">Reason</label>
+      <input id="reason-{{ t.id }}" name="reason" placeholder="Reason for rejecting" required>
+      <button type="submit" class="secondary">Reject</button>
+    </form>
+  </div>
+</section>
+{% endfor %}
+{% else %}
+<p class="empty">No requests are waiting for you.</p>
+{% endif %}
+{% endblock %}

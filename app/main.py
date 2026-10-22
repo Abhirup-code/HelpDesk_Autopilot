@@ -8,6 +8,7 @@ from app.auth import make_current_user
 from app.db import init_db, make_engine, make_session_factory, session_dependency
 from app.directory import Directory, directory_from_env
 from app.metrics import install_metrics
+from app.portal import install_portal
 from app.routes import accounts, approvals, tickets
 
 
@@ -24,7 +25,7 @@ def create_app(
     directory = directory if directory is not None else directory_from_env()
     base_url = base_url or os.environ.get("PUBLIC_URL", "http://127.0.0.1:8000")
 
-    app = FastAPI(title="HelpDesk Autopilot", version="0.4.0")
+    app = FastAPI(title="HelpDesk Autopilot", version="0.5.0")
     app.state.session_factory = factory
     app.state.directory = directory
 
@@ -46,4 +47,6 @@ def create_app(
     app.include_router(tickets.build_router(get_session, current_user, directory, base_url))
     app.include_router(accounts.build_router(get_session, current_user, directory, base_url))
     app.include_router(approvals.build_router(get_session, current_user, directory, base_url))
+    grafana_url = os.environ.get("GRAFANA_URL", "http://127.0.0.1:3000")
+    install_portal(app, get_session, directory, base_url, grafana_url)
     return app

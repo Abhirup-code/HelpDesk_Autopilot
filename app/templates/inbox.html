@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Inbox · HelpDesk Autopilot{% endblock %}
+{% block content %}
+<h1>Inbox</h1>
+<p class="muted">Messages that would normally arrive by email.</p>
+{% for m in messages %}
+<article class="card message">
+  <h2>{{ m.subject }}</h2>
+  <time>{{ m.created_at | when }}</time>
+  <p class="body">{{ m.body | linkify }}</p>
+</article>
+{% else %}
+<p class="empty">No messages yet.</p>
+{% endfor %}
+{% endblock %}

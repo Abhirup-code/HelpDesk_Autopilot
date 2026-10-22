@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Set your password · HelpDesk Autopilot{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Set a new password</h1>
+  <p class="muted">For <strong>{{ username }}</strong>. This link works once.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>New password <input name="password" type="password" autocomplete="new-password" required minlength="{{ min_length }}"></label>
+    <label>Type it again <input name="confirm" type="password" autocomplete="new-password" required minlength="{{ min_length }}"></label>
+    <p class="hint">At least {{ min_length }} characters, and not containing your username.</p>
+    <button type="submit">Set password</button>
+  </form>
+</section>
+{% endblock %}

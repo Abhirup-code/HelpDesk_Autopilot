@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}#{{ ticket.id }} · HelpDesk Autopilot{% endblock %}
+{% block content %}
+<p><a href="/tickets">← Tickets</a></p>
+<section class="card">
+  <div class="heading">
+    <h1>#{{ ticket.id }} {{ ticket.title }}</h1>
+    <span class="pill s-{{ ticket.status.value }}">{{ STATUS_LABELS[ticket.status.value] }}</span>
+  </div>
+  <dl class="facts">
+    <dt>Type</dt><dd>{{ TYPE_LABELS[ticket.type.value] }}</dd>
+    <dt>Priority</dt><dd><span class="prio prio-{{ ticket.priority.value }}">{{ ticket.priority.value }}</span></dd>
+    <dt>Requested by</dt><dd>{{ ticket.requester.full_name }}</dd>
+    <dt>Created</dt><dd>{{ ticket.created_at | when }}</dd>
+    <dt>Due</dt><dd>{{ ticket.due_at | when }}{% if breached %} <span class="late">Past due</span>{% endif %}</dd>
+    {% if ticket.resolved_at %}<dt>Closed</dt><dd>{{ ticket.resolved_at | when }}</dd>{% endif %}
+    {% for key, value in (ticket.details or {}).items() if key != "demo" %}
+    <dt>{{ key.replace('_', ' ') | capitalize }}</dt><dd>{{ value }}</dd>
+    {% endfor %}
+  </dl>
+  <p>{{ ticket.description }}</p>
+  {% if ticket.automation_error %}<p class="error">Automation stopped: {{ ticket.automation_error }}. IT will take it from here.</p>{% endif %}
+
+  {% if user.role.value == "agent" %}
+  <form method="post" action="/tickets/{{ ticket.id }}/status" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Status
+      <select name="status">{% for s in statuses %}<option value="{{ s }}" {% if s == ticket.status.value %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>{% endfor %}</select>
+    </label>
+    <button type="submit">Update</button>
+  </form>
+  {% endif %}
+</section>
+
+{% if history %}
+<section class="card">
+  <h2>History</h2>
+  <ol class="timeline">
+    {% for e in history %}
+    <li><time>{{ e.at | when }}</time> <strong>{{ e.actor }}</strong> {{ e.action }} {{ e.target }}{% if e.detail %} · {{ e.detail }}{% endif %}</li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
+{% endblock %}
