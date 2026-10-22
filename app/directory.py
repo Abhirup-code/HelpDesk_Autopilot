@@ -5,6 +5,8 @@ Directory with small changes). `InMemoryDirectory` behaves the same way and is
 used for local development without LDAP and in fast unit tests.
 """
 
+import hashlib
+import hmac
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -36,6 +38,7 @@ class Directory(Protocol):
     def set_password(self, username: str, password: str) -> None: ...
     def disable_user(self, username: str) -> None: ...
     def is_disabled(self, username: str) -> bool: ...
+    def authenticate(self, username: str, password: str) -> bool: ...
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +53,7 @@ class _Person:
     department: str
     password_set: bool = False
     disabled: bool = False
+    password_hash: str | None = None
 
 
 @dataclass
@@ -98,14 +102,27 @@ class InMemoryDirectory:
         if person.disabled:
             raise DirectoryError(f"Account is disabled: {username}")
         person.password_set = True
+        person.password_hash = _test_hash(password)
 
     def disable_user(self, username: str) -> None:
         person = self._person(username)
         person.disabled = True
         person.password_set = False
+        person.password_hash = None
 
     def is_disabled(self, username: str) -> bool:
         return self._person(username).disabled
+
+    def authenticate(self, username: str, password: str) -> bool:
+        person = self.people.get(username)
+        if person is None or person.disabled or person.password_hash is None:
+            return False
+        return hmac.compare_digest(person.password_hash, _test_hash(password))
+
+
+def _test_hash(password: str) -> str:
+    # Only for the in-memory test directory. The real directory hashes with Argon2id.
+    return hashlib.sha256(password.encode()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -125,8 +142,15 @@ DEFAULT_GROUPS = [
 
 
 class LdapDirectory:
-    def __init__(self, connect: Callable[[], Connection], base_dn: str) -> None:
+    def __init__(
+        self,
+        connect: Callable[[], Connection],
+        base_dn: str,
+        bind_as: Callable[[str, str], bool] | None = None,
+    ) -> None:
         self._connect = connect
+        # Checks a person's own password by signing in to the directory as them.
+        self._bind_as = bind_as
         self.base = base_dn
         self.users_ou = f"ou=Users,{base_dn}"
         self.disabled_ou = f"ou=Disabled,{base_dn}"
@@ -142,7 +166,10 @@ class LdapDirectory:
         def connect() -> Connection:
             return Connection(Server(url), bind_dn, password, auto_bind=True, raise_exceptions=True)
 
-        return cls(connect, base)
+        def bind_as(dn: str, user_password: str) -> bool:
+            return Connection(Server(url), dn, user_password).bind()
+
+        return cls(connect, base, bind_as)
 
     def _user_dn(self, username: str, disabled: bool = False) -> str:
         ou = self.disabled_ou if disabled else self.users_ou
@@ -257,6 +284,21 @@ class LdapDirectory:
             self._change_password(conn, dn, password)
 
         self._run(action)
+
+    def authenticate(self, username: str, password: str) -> bool:
+        """True if the password is right and the account is active.
+
+        Never raises: any directory problem counts as a failed sign-in.
+        """
+        if not password or self._bind_as is None:
+            return False
+        try:
+            dn = self._run(lambda conn: self._find_dn(conn, username))
+            if dn is None or dn.lower().endswith(self.disabled_ou.lower()):
+                return False
+            return bool(self._bind_as(dn, password))
+        except Exception:
+            return False
 
     @staticmethod
     def _change_password(conn: Connection, dn: str, password: str) -> None:

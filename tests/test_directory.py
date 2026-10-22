@@ -33,13 +33,20 @@ def mock_ldap(monkeypatch) -> LdapDirectory:
     conn.unbind = lambda: None  # keep the single mock connection open between calls
     directory = LdapDirectory(lambda: conn, BASE)
 
-    # The mock server has no password-modify operation; record calls instead.
+    # The mock server has no password-modify operation; record calls instead,
+    # and check sign-ins against what was recorded.
     directory.password_changes = []
+    passwords: dict[str, str] = {}
 
     def fake_change(_conn, dn, password):
         directory.password_changes.append(dn)
+        passwords[dn] = password
+
+    def fake_bind_as(dn, password):
+        return passwords.get(dn) == password
 
     monkeypatch.setattr(directory, "_change_password", fake_change)
+    directory._bind_as = fake_bind_as
     return directory
 
 
@@ -51,6 +58,7 @@ def real_ldap() -> LdapDirectory:
             Server(url), SERVICE_DN, password, auto_bind=True, raise_exceptions=True
         ),
         BASE,
+        bind_as=lambda dn, pw: Connection(Server(url), dn, pw).bind(),
     )
     for user in ("jdoe", "jdoe2"):
         if directory.user_exists(user):
@@ -186,3 +194,23 @@ def test_from_env(monkeypatch):
     assert ldap_dir.users_ou == f"ou=Users,{BASE}"
     with pytest.raises(DirectoryError):
         ldap_dir.user_exists("jdoe")
+
+
+def test_authenticate(directory):
+    directory.create_user("jdoe", "Jane", "Doe", "Finance")
+    assert not directory.authenticate("jdoe", "anything")  # no password set yet
+    directory.set_password("jdoe", "correct-horse-battery-1")
+    assert directory.authenticate("jdoe", "correct-horse-battery-1")
+    assert not directory.authenticate("jdoe", "wrong-password-123")
+    assert not directory.authenticate("jdoe", "")
+    assert not directory.authenticate("ghost", "correct-horse-battery-1")
+    directory.disable_user("jdoe")
+    assert not directory.authenticate("jdoe", "correct-horse-battery-1")
+
+
+def test_ldap_authenticate_without_bind_or_on_errors():
+    def broken():
+        raise OSError("down")
+
+    assert not LdapDirectory(broken, BASE).authenticate("jdoe", "pw")  # no bind_as
+    assert not LdapDirectory(broken, BASE, bind_as=lambda dn, pw: True).authenticate("jdoe", "pw")
