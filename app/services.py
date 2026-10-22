@@ -199,11 +199,15 @@ def audit_log(
 ) -> list[AuditEvent]:
     if user.role != Role.AGENT:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "IT agents only")
-    query = select(AuditEvent).order_by(AuditEvent.id.desc()).limit(limit)
+    # Newest first by time, so entries read in order even when they were
+    # imported out of sequence (like the demo data).
+    query = select(AuditEvent).order_by(AuditEvent.at.desc(), AuditEvent.id.desc()).limit(limit)
+    # Filters match part of the text and ignore capitals: "group" finds group.add
+    # and group.remove, "Emma" finds emma.
     if target:
-        query = query.where(AuditEvent.target == target)
+        query = query.where(AuditEvent.target.icontains(target.strip(), autoescape=True))
     if action:
-        query = query.where(AuditEvent.action == action)
+        query = query.where(AuditEvent.action.icontains(action.strip(), autoescape=True))
     if ticket_id is not None:
         query = query.where(AuditEvent.ticket_id == ticket_id)
     return list(session.scalars(query))

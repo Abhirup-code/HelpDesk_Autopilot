@@ -273,6 +273,10 @@ def test_audit_log_filters_and_order(client):
     assert len(by_action) == 1
     by_target = client.get("/api/audit?target=nobody", headers=auth("ava")).json()
     assert by_target == []
+    partial = client.get("/api/audit?action=APPROVAL&target=Emm", headers=auth("ava")).json()
+    assert {e["action"] for e in partial} == {"approval.manager", "approval.reject"}
+    wildcard = client.get("/api/audit?action=%25", headers=auth("ava")).json()
+    assert wildcard == []  # "%" is matched literally, not as a SQL wildcard
     limited = client.get("/api/audit?limit=1", headers=auth("ava")).json()
     assert len(limited) == 1
     assert client.get("/api/audit?limit=0", headers=auth("ava")).status_code == 422
@@ -295,3 +299,22 @@ def test_database_refuses_to_change_audit_rows(app, change):
             session.delete(event)
         with pytest.raises(DBAPIError, match="append-only"):
             session.commit()
+
+
+def test_audit_log_is_newest_first_by_time(client, app):
+    from datetime import timedelta
+
+    from app.models import utcnow
+
+    now = utcnow()
+    with app.state.session_factory() as session:
+        # Added out of time order, like imported demo data.
+        for hours_ago, action in [(1, "middle"), (5, "oldest"), (0, "newest")]:
+            session.add(
+                AuditEvent(
+                    at=now - timedelta(hours=hours_ago), actor="x", action=action, target="y"
+                )
+            )
+        session.commit()
+    events = client.get("/api/audit", headers=auth("ava")).json()
+    assert [e["action"] for e in events] == ["newest", "middle", "oldest"]
