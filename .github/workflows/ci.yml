@@ -78,3 +78,66 @@ jobs:
           }
           run_promtool check config /etc/prometheus/prometheus.yml
           run_promtool test rules /etc/prometheus/alerts_test.yml
+
+  images:
+    name: Build and scan images
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write # upload scan results to the Security tab
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build images
+        run: |
+          docker build -t helpdesk-api:test .
+          docker build -t helpdesk-ldap:test ldap
+          test "$(docker run --rm --entrypoint id helpdesk-api:test -u)" != "0"
+          test "$(docker run --rm --entrypoint id helpdesk-ldap:test -u)" != "0"
+      - name: Scan Dockerfiles for misconfigurations
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+      - name: Scan API image (SARIF report)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: helpdesk-api:test
+          format: sarif
+          output: trivy-api.sarif
+          ignore-unfixed: true
+          skip-setup-trivy: true
+      - name: Upload API image scan to Security tab
+        if: always() && github.event_name == 'push'
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: trivy-api.sarif
+          category: trivy-api
+      - name: Fail on fixable CRITICAL or HIGH vulnerabilities
+        run: |
+          for image in helpdesk-api:test helpdesk-ldap:test; do
+            trivy image --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 "$image"
+          done
+
+  e2e:
+    name: End-to-end (Docker Compose)
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the full stack and test it
+        run: scripts/e2e.sh
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose logs --tail 100
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v
