@@ -1,25 +1,13 @@
 """Approvals for access requests, and the read-only audit log."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.auth import require_agent
-from app.automation import AccessFlow, Automator
+from app import services
 from app.directory import Directory
-from app.models import AuditEvent, Role, Status, Ticket, User
+from app.models import AuditEvent, User
 from app.routes.tickets import serialize
 from app.schemas import ApprovalDecision, AuditEventOut, ErrorOut, TicketOut
-
-NO_PENDING = "No pending approval for you on this ticket"
-
-
-def can_decide(ticket: Ticket, user: User) -> bool:
-    if ticket.status == Status.WAITING_APPROVAL:
-        return ticket.requester.manager_id == user.id
-    if ticket.status == Status.WAITING_IT_APPROVAL:
-        return user.role == Role.AGENT
-    return False
 
 
 def build_router(get_session, current_user, directory: Directory, base_url: str) -> APIRouter:
@@ -36,21 +24,14 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
     ) -> list[TicketOut]:
         """Requests waiting for you: your team's requests if you are a manager,
         privileged and no-manager requests if you are an IT agent."""
-        query = select(Ticket).join(Ticket.requester).order_by(Ticket.created_at)
-        if user.role == Role.AGENT:
-            query = query.where(Ticket.status == Status.WAITING_IT_APPROVAL)
-        else:
-            query = query.where(
-                Ticket.status == Status.WAITING_APPROVAL, User.manager_id == user.id
-            )
-        return [serialize(t) for t in session.scalars(query)]
+        return [serialize(t) for t in services.pending_approvals(session, user)]
 
     @router.post(
         "/approvals/{ticket_id}",
         response_model=TicketOut,
         responses={
             403: {"model": ErrorOut, "description": "You can't approve your own request"},
-            404: {"model": ErrorOut, "description": NO_PENDING},
+            404: {"model": ErrorOut, "description": services.NO_PENDING},
         },
     )
     def decide(
@@ -59,29 +40,9 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         user: User = Depends(current_user),
         session: Session = Depends(get_session),
     ) -> TicketOut:
-        ticket = session.get(Ticket, ticket_id)
-        if ticket is None or not can_decide(ticket, user):
-            raise HTTPException(status.HTTP_404_NOT_FOUND, NO_PENDING)
-        if ticket.requester_id == user.id:
-            # Separation of duties: nobody approves their own access. The attempt is
-            # logged, because security teams want to see who tried.
-            session.add(
-                AuditEvent(
-                    actor=user.username,
-                    action="approval.denied",
-                    target=user.username,
-                    ticket_id=ticket.id,
-                    detail=f"tried to {body.decision} own request for {ticket.details['group']}",
-                )
-            )
-            session.commit()
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't approve your own request")
-        flow = AccessFlow(Automator(session, directory, base_url))
-        if body.decision == "approve":
-            flow.approve(ticket, user)
-        else:
-            flow.reject(ticket, user, body.reason.strip())
-        session.commit()
+        ticket = services.decide_approval(
+            session, directory, base_url, user, ticket_id, body.decision, body.reason
+        )
         return serialize(ticket)
 
     @router.get(
@@ -99,14 +60,6 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
     ) -> list[AuditEvent]:
         """Every directory change, newest first. Read-only: there is no way to edit
         or delete entries, and the database refuses it too."""
-        require_agent(user)
-        query = select(AuditEvent).order_by(AuditEvent.id.desc()).limit(limit)
-        if target:
-            query = query.where(AuditEvent.target == target)
-        if action:
-            query = query.where(AuditEvent.action == action)
-        if ticket_id is not None:
-            query = query.where(AuditEvent.ticket_id == ticket_id)
-        return list(session.scalars(query))
+        return services.audit_log(session, user, target, action, ticket_id, limit)
 
     return router

@@ -19,6 +19,7 @@ Security tab (private vulnerability reporting).
 | Access | Manager approval for access, IT approval for admin rights, no self-approval |
 | Audit | Every change is logged; database triggers block edits and deletes; denied attempts are logged too |
 | Dashboard | Grafana reads with its own login that can only see tickets and the audit log |
+| Web portal | Directory sign-in, signed session cookies, CSRF tokens on every form, lockout after 5 wrong passwords, same-site redirects only, strict Content-Security-Policy |
 
 ## Demo credentials
 

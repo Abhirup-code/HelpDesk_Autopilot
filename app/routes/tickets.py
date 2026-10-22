@@ -1,22 +1,16 @@
 """Ticket endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app import sla
-from app.auth import require_agent
-from app.automation import Automator, today_utc
+from app import services
 from app.directory import Directory
-from app.models import Priority, Role, Status, Ticket, TicketType, User, utcnow
+from app.models import Priority, Status, Ticket, TicketType, User
 from app.schemas import ErrorOut, StatusUpdate, TicketCreate, TicketOut
 
 UNAUTHORIZED = {401: {"model": ErrorOut, "description": "Missing or invalid token"}}
 FORBIDDEN = {403: {"model": ErrorOut, "description": "Your role cannot do this"}}
 NOT_FOUND = {404: {"model": ErrorOut, "description": "Ticket not found or not yours"}}
-
-# Only managers and IT can request account changes for other people.
-PEOPLE_CHANGES = {TicketType.NEW_HIRE, TicketType.OFFBOARDING}
 
 
 def serialize(ticket: Ticket) -> TicketOut:
@@ -40,13 +34,6 @@ def serialize(ticket: Ticket) -> TicketOut:
 def build_router(get_session, current_user, directory: Directory, base_url: str) -> APIRouter:
     router = APIRouter(prefix="/api/tickets", tags=["tickets"], responses=UNAUTHORIZED)
 
-    def visible_ticket(ticket_id: int, user: User, session: Session) -> Ticket:
-        ticket = session.get(Ticket, ticket_id)
-        # Return 404 (not 403) for other people's tickets so IDs can't be probed.
-        if ticket is None or (user.role != Role.AGENT and ticket.requester_id != user.id):
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Ticket not found")
-        return ticket
-
     @router.post(
         "",
         response_model=TicketOut,
@@ -58,32 +45,7 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         user: User = Depends(current_user),
         session: Session = Depends(get_session),
     ) -> TicketOut:
-        if body.type in PEOPLE_CHANGES and user.role == Role.EMPLOYEE:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Only managers and IT can request this")
-        if body.type == TicketType.OFFBOARDING and not directory.user_exists(
-            body.details["username"]
-        ):
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_CONTENT,
-                f"No directory account named {body.details['username']}",
-            )
-        now = utcnow()
-        priority = body.priority or sla.default_priority(body.type)
-        ticket = Ticket(
-            type=body.type,
-            priority=priority,
-            status=Status.NEW,
-            title=body.title,
-            description=body.description,
-            requester_id=user.id,
-            created_at=now,
-            due_at=sla.ticket_due_at(body.type, priority, now, body.details),
-            details=body.details,
-        )
-        session.add(ticket)
-        session.commit()
-        Automator(session, directory, base_url).handle_new_ticket(ticket, today_utc())
-        return serialize(ticket)
+        return serialize(services.create_ticket(session, directory, base_url, user, body))
 
     @router.get("", response_model=list[TicketOut])
     def list_tickets(
@@ -93,16 +55,8 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         user: User = Depends(current_user),
         session: Session = Depends(get_session),
     ) -> list[TicketOut]:
-        query = select(Ticket).order_by(Ticket.due_at)
-        if user.role != Role.AGENT:
-            query = query.where(Ticket.requester_id == user.id)
-        if status_filter:
-            query = query.where(Ticket.status == status_filter)
-        if type_filter:
-            query = query.where(Ticket.type == type_filter)
-        if priority:
-            query = query.where(Ticket.priority == priority)
-        return [serialize(t) for t in session.scalars(query)]
+        tickets = services.list_tickets(session, user, status_filter, type_filter, priority)
+        return [serialize(t) for t in tickets]
 
     @router.get("/{ticket_id}", response_model=TicketOut, responses={**NOT_FOUND})
     def get_ticket(
@@ -110,7 +64,7 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         user: User = Depends(current_user),
         session: Session = Depends(get_session),
     ) -> TicketOut:
-        return serialize(visible_ticket(ticket_id, user, session))
+        return serialize(services.visible_ticket(session, user, ticket_id))
 
     @router.patch(
         "/{ticket_id}/status",
@@ -123,10 +77,6 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         user: User = Depends(current_user),
         session: Session = Depends(get_session),
     ) -> TicketOut:
-        require_agent(user)
-        ticket = visible_ticket(ticket_id, user, session)
-        ticket.set_status(body.status)
-        session.commit()
-        return serialize(ticket)
+        return serialize(services.change_status(session, user, ticket_id, body.status))
 
     return router

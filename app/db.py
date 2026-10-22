@@ -2,6 +2,7 @@
 
 import os
 import threading
+import weakref
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -17,8 +18,17 @@ class Base(DeclarativeBase):
     pass
 
 
+# Every engine created, so tests can close their connection pools afterwards.
+ENGINES: "weakref.WeakSet[Engine]" = weakref.WeakSet()
+
+
 def make_engine(url: str | None = None) -> Engine:
-    url = url or os.environ.get("DATABASE_URL", DEFAULT_URL)
+    engine = _create(url or os.environ.get("DATABASE_URL", DEFAULT_URL))
+    ENGINES.add(engine)
+    return engine
+
+
+def _create(url: str) -> Engine:
     if url.startswith("sqlite"):
         kwargs = {"connect_args": {"check_same_thread": False}}
         if url in ("sqlite://", "sqlite:///:memory:"):
