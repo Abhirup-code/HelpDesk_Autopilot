@@ -345,13 +345,14 @@ def install_portal(
         try:
             user = signed_in(request, session)
             check_csrf(request, csrf)
-            services.change_status(session, user, ticket_id, Status(status))
+            ticket = services.change_status(session, user, ticket_id, Status(status))
         except HTTPException as exc:
             return error_page(request, user, exc)
         except ValueError:
             return error_page(request, user, HTTPException(400, "Unknown status."))
         flash(request, f"Status changed to {STATUS_LABELS[status]}.")
-        return go(f"/tickets/{ticket_id}")
+        # Build the address from the saved ticket, not from the request.
+        return go(f"/tickets/{ticket.id}")
 
     # -- approvals -----------------------------------------------------------------------
 
