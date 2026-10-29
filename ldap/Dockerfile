@@ -1,4 +1,4 @@
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk upgrade --no-cache && apk add --no-cache openldap openldap-back-mdb openldap-passwd-argon2 openldap-clients \
     && mkdir -p /var/lib/openldap/data /run/openldap /etc/helpdesk-ldap \
     && chown -R ldap:ldap /var/lib/openldap /run/openldap
