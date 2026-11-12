@@ -1,9 +1,9 @@
-FROM python:3.14-slim AS build
+FROM python:3.15-slim AS build
 WORKDIR /build
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-FROM python:3.14-slim
+FROM python:3.15-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # Latest OS security patches. pip is removed because nothing installs packages at runtime.
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
