@@ -299,7 +299,7 @@ Run the end-to-end test on your own machine with `scripts/e2e.sh`.
 | POST | `/api/tickets` | Signed in | Create a ticket. Automations run right away |
 | GET | `/api/tickets` | Signed in | Employees see their own tickets, IT agents see all. Filter with `status`, `type`, `priority` |
 | GET | `/api/tickets/{id}` | Owner or agent | One ticket. Other people's tickets return 404 |
-| PATCH | `/api/tickets/{id}/status` | Agent | Change status. Resolving records the time |
+| PATCH | `/api/tickets/{id}/status` | Agent | Set status to `new`, `in_progress` or `resolved`. The change goes in the audit log, and resolving records the time |
 | GET | `/api/inbox` | Signed in | Your messages (stands in for email in the demo) |
 | POST | `/api/password-resets/{token}` | Link holder | Set a new password (12+ characters, not containing your username) |
 | POST | `/api/automation/run-due` | Agent | Run due offboardings now instead of waiting for the worker |

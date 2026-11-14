@@ -330,7 +330,7 @@ def install_portal(
             ticket=ticket,
             history=history,
             breached=ticket.is_breached(),
-            statuses=[s.value for s in Status],
+            statuses=[s.value for s in Status if s in services.MANUAL_STATUSES],
         )
 
     @router.post("/tickets/{ticket_id}/status")

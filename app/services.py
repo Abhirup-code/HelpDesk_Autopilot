@@ -28,6 +28,8 @@ from app.schemas import TicketCreate
 
 INVALID_LINK = "This link is invalid, expired or already used"
 NO_PENDING = "No pending approval for you on this ticket"
+# The statuses an IT agent may set by hand. The rest are set by approvals and automations.
+MANUAL_STATUSES = {Status.NEW, Status.IN_PROGRESS, Status.RESOLVED}
 # Only managers and IT can request account changes for other people.
 PEOPLE_CHANGES = {TicketType.NEW_HIRE, TicketType.OFFBOARDING}
 
@@ -111,7 +113,27 @@ def change_status(session: Session, user: User, ticket_id: int, new_status: Stat
     if user.role != Role.AGENT:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "IT agents only")
     ticket = visible_ticket(session, user, ticket_id)
+    if new_status not in MANUAL_STATUSES:
+        # The other statuses mean something happened: an approval, a rejection with a
+        # reason, or an automation. Setting them by hand would make the record lie.
+        allowed = ", ".join(s.value for s in Status if s in MANUAL_STATUSES)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Status can only be set by hand to: {allowed}",
+        )
+    old_status = ticket.status
+    if new_status == old_status:
+        return ticket
     ticket.set_status(new_status)
+    session.add(
+        AuditEvent(
+            actor=user.username,
+            action="ticket.status",
+            target=ticket.requester.username,
+            ticket_id=ticket.id,
+            detail=f"{old_status.value} -> {new_status.value}",
+        )
+    )
     session.commit()
     return ticket
 

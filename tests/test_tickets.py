@@ -1,5 +1,7 @@
 from datetime import datetime
 
+import pytest
+
 from tests.conftest import auth
 
 NEW_TICKET = {
@@ -131,3 +133,31 @@ def test_employee_cannot_change_status(client):
         f"/api/tickets/{ticket_id}/status", json={"status": "resolved"}, headers=auth("emma")
     )
     assert response.status_code == 403
+
+
+def test_status_changes_by_hand_are_in_the_audit_log(client):
+    ticket_id = create(client).json()["id"]
+    url = f"/api/tickets/{ticket_id}/status"
+    client.patch(url, json={"status": "in_progress"}, headers=auth("ava"))
+    client.patch(url, json={"status": "resolved"}, headers=auth("ava"))
+    # Setting the same status again changes nothing and adds no entry.
+    client.patch(url, json={"status": "resolved"}, headers=auth("ava"))
+    log = client.get(f"/api/audit?ticket_id={ticket_id}", headers=auth("ava")).json()
+    changes = [(e["actor"], e["action"], e["target"], e["detail"]) for e in reversed(log)]
+    assert changes == [
+        ("ava", "ticket.status", "emma", "new -> in_progress"),
+        ("ava", "ticket.status", "emma", "in_progress -> resolved"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "status", ["auto_resolved", "waiting_approval", "waiting_it_approval", "rejected"]
+)
+def test_statuses_that_belong_to_approvals_and_automations_cannot_be_set_by_hand(client, status):
+    ticket_id = create(client).json()["id"]
+    response = client.patch(
+        f"/api/tickets/{ticket_id}/status", json={"status": status}, headers=auth("ava")
+    )
+    assert response.status_code == 422
+    assert "new, in_progress, resolved" in response.json()["detail"]
+    assert client.get(f"/api/tickets/{ticket_id}", headers=auth("ava")).json()["status"] == "new"
