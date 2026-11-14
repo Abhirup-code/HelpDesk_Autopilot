@@ -5,7 +5,7 @@ codes in both places, so the rules can't drift apart between the two front ends.
 """
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app import sla
@@ -13,6 +13,7 @@ from app.auth import hash_token
 from app.automation import AccessFlow, Automator, today_utc
 from app.directory import Directory, DirectoryError
 from app.models import (
+    CLOSED_STATUSES,
     AuditEvent,
     InboxMessage,
     ResetToken,
@@ -42,14 +43,16 @@ def visible_ticket(session: Session, user: User, ticket_id: int) -> Ticket:
     return ticket
 
 
-def list_tickets(
-    session: Session,
+def ticket_query(
     user: User,
     status_filter: Status | None = None,
     type_filter: TicketType | None = None,
     priority=None,
-) -> list[Ticket]:
-    query = select(Ticket).order_by(Ticket.due_at)
+    search: str | None = None,
+    overdue: bool = False,
+):
+    """The tickets this person may see, narrowed by the filters."""
+    query = select(Ticket)
     if user.role != Role.AGENT:
         query = query.where(Ticket.requester_id == user.id)
     if status_filter:
@@ -58,7 +61,40 @@ def list_tickets(
         query = query.where(Ticket.type == type_filter)
     if priority:
         query = query.where(Ticket.priority == priority)
-    return list(session.scalars(query))
+    if search and search.strip():
+        # Matches part of the title or description and ignores capitals. Escaped, so
+        # "100%" looks for those characters and not for "100" followed by anything.
+        words = search.strip()
+        query = query.where(
+            or_(
+                Ticket.title.icontains(words, autoescape=True),
+                Ticket.description.icontains(words, autoescape=True),
+            )
+        )
+    if overdue:
+        # Still open and past due. A paused ticket is judged at the moment it was paused,
+        # the same rule Ticket.is_breached uses.
+        query = query.where(
+            Ticket.status.not_in(CLOSED_STATUSES),
+            or_(
+                and_(Ticket.paused_at.is_(None), Ticket.due_at < utcnow()),
+                and_(Ticket.paused_at.is_not(None), Ticket.paused_at > Ticket.due_at),
+            ),
+        )
+    return query
+
+
+def list_tickets(
+    session: Session,
+    user: User,
+    status_filter: Status | None = None,
+    type_filter: TicketType | None = None,
+    priority=None,
+    search: str | None = None,
+    overdue: bool = False,
+) -> list[Ticket]:
+    query = ticket_query(user, status_filter, type_filter, priority, search, overdue)
+    return list(session.scalars(query.order_by(Ticket.due_at, Ticket.id)))
 
 
 def on_team(session: Session, manager: User, username: str) -> bool:

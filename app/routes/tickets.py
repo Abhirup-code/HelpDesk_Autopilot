@@ -52,10 +52,16 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         status_filter: Status | None = Query(None, alias="status"),
         type_filter: TicketType | None = Query(None, alias="type"),
         priority: Priority | None = None,
+        q: str | None = Query(
+            None, max_length=100, description="Words in the title or description"
+        ),
+        overdue: bool = Query(False, description="Only open tickets that are past due"),
         user: User = Depends(current_user),
         session: Session = Depends(get_session),
     ) -> list[TicketOut]:
-        tickets = services.list_tickets(session, user, status_filter, type_filter, priority)
+        tickets = services.list_tickets(
+            session, user, status_filter, type_filter, priority, q, overdue
+        )
         return [serialize(t) for t in tickets]
 
     @router.get("/{ticket_id}", response_model=TicketOut, responses={**NOT_FOUND})

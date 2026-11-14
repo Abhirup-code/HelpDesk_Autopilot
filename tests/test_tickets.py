@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
+from app.models import Ticket, utcnow
 from tests.conftest import auth
 
 NEW_TICKET = {
@@ -189,3 +190,60 @@ def test_statuses_that_belong_to_approvals_and_automations_cannot_be_set_by_hand
     assert response.status_code == 422
     assert "new, in_progress, resolved" in response.json()["detail"]
     assert client.get(f"/api/tickets/{ticket_id}", headers=auth("ava")).json()["status"] == "new"
+
+
+def test_search_matches_title_or_description_and_ignores_capitals(client):
+    create(client, title="Laptop will not charge", description="Battery is at 3%")
+    create(client, title="Need a monitor", description="For the new LAPTOP dock")
+    create(client, title="Keyboard is sticky", description="Spilled coffee")
+    found = client.get("/api/tickets?q=laptop", headers=auth("emma")).json()
+    assert {t["title"] for t in found} == {"Laptop will not charge", "Need a monitor"}
+    # "%" is searched as a character, not as a wildcard.
+    assert len(client.get("/api/tickets?q=3%25", headers=auth("emma")).json()) == 1
+    assert client.get("/api/tickets?q=%25", headers=auth("emma")).json()[0]["title"] == (
+        "Laptop will not charge"
+    )
+
+
+def test_search_never_shows_other_peoples_tickets(client):
+    create(client, who="liam", title="Liam's secret laptop")
+    assert client.get("/api/tickets?q=laptop", headers=auth("emma")).json() == []
+    assert len(client.get("/api/tickets?q=laptop", headers=auth("ava")).json()) == 1
+
+
+def test_overdue_filter_finds_open_tickets_past_due(client, app):
+    late_id = create(client, title="Late one").json()["id"]
+    closed_late_id = create(client, title="Closed late").json()["id"]
+    create(client, title="On time")
+    with app.state.session_factory() as session:
+        for ticket_id in (late_id, closed_late_id):
+            ticket = session.get(Ticket, ticket_id)
+            ticket.due_at = utcnow() - timedelta(hours=2)
+        session.commit()
+    client.patch(
+        f"/api/tickets/{closed_late_id}/status", json={"status": "resolved"}, headers=auth("ava")
+    )
+    overdue = client.get("/api/tickets?overdue=true", headers=auth("ava")).json()
+    assert [t["title"] for t in overdue] == ["Late one"]
+    assert overdue[0]["sla_breached"] is True
+
+
+def test_a_ticket_paused_before_it_was_due_is_not_overdue(client, app):
+    body = client.post(
+        "/api/tickets",
+        json={
+            "type": "access_request",
+            "title": "Need Tableau",
+            "description": "Reports",
+            "details": {"group": "tableau-users"},
+        },
+        headers=auth("emma"),
+    ).json()
+    assert body["status"] == "waiting_approval"
+    with app.state.session_factory() as session:
+        ticket = session.get(Ticket, body["id"])
+        # Paused an hour before it was due, and the due time has since passed.
+        ticket.due_at = utcnow() - timedelta(hours=1)
+        ticket.paused_at = utcnow() - timedelta(hours=2)
+        session.commit()
+    assert client.get("/api/tickets?overdue=true", headers=auth("ava")).json() == []
