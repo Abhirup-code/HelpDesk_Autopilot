@@ -1,0 +1,37 @@
+/* The bar and highlights the click-through demo adds on top of the real portal pages. */
+.demo-bar { position: sticky; top: 0; z-index: 10; display: grid; grid-template-columns: 1fr auto; gap: 6px 16px;
+            align-items: center; padding: 10px 24px; background: #1c1917; color: #f1ece4;
+            font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.demo-bar p { margin: 0; }
+.demo-tag { display: inline-block; margin-right: 8px; padding: 1px 8px; border-radius: 999px; background: #c2410c;
+            font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.demo-chapter { font-size: 12px; color: #b8afa5; }
+.demo-caption { grid-column: 1; font-size: 15px; max-width: 80ch; }
+.demo-nav { grid-row: 1 / span 2; grid-column: 2; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.demo-nav a { color: #f1ece4; text-decoration: none; font-weight: 600; padding: 6px 12px; border-radius: 999px;
+              border: 1px solid #57504a; }
+.demo-nav a:hover { border-color: #f1ece4; }
+.demo-nav a.demo-next { background: #f1ece4; color: #1c1917; border-color: #f1ece4; }
+.demo-nav a[aria-disabled="true"] { opacity: .35; pointer-events: none; }
+.demo-count { color: #b8afa5; font-variant-numeric: tabular-nums; }
+.demo-progress { grid-column: 1 / -1; width: 100%; height: 4px; border: 0; border-radius: 4px; appearance: none;
+                 background: #3a3531; color: #f97316; overflow: hidden; }
+.demo-progress::-webkit-progress-bar { background: #3a3531; }
+.demo-progress::-webkit-progress-value { background: #f97316; }
+.demo-progress::-moz-progress-bar { background: #f97316; }
+
+/* The one thing to click on this screen. */
+[data-demo-hot] { position: relative; outline: 3px solid #f97316 !important; outline-offset: 3px; border-radius: 6px;
+                  animation: demo-pulse 1.4s ease-in-out infinite; }
+@keyframes demo-pulse { 50% { outline-offset: 7px; outline-color: #fdba74; } }
+.demo-hint { position: fixed; left: 50%; bottom: 24px; translate: -50% 0; z-index: 20; margin: 0; padding: 10px 16px;
+             border-radius: 999px; background: #1c1917; color: #f1ece4; font: 600 14px system-ui, sans-serif;
+             box-shadow: 0 6px 24px rgba(0, 0, 0, .3); }
+.demo-hint[hidden] { display: none; }
+input[readonly], textarea[readonly] { cursor: default; }
+
+@media (max-width: 720px) {
+  .demo-bar { grid-template-columns: 1fr; padding: 10px 16px; }
+  .demo-nav { grid-row: auto; grid-column: 1; }
+}
+@media (prefers-reduced-motion: reduce) { [data-demo-hot] { animation: none; } }
