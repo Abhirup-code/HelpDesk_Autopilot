@@ -52,13 +52,31 @@ def issue_password_link(
     session: Session, username: str, base_url: str, ttl: timedelta, ticket: Ticket | None = None
 ) -> str:
     """Create a single-use link to set a directory password. Only its hash is stored."""
+    # Only the newest link works. Without this, asking three times leaves three
+    # working links in the inbox, and any old one could still set the password.
+    now = utcnow()
+    stale = session.scalars(
+        select(ResetToken).where(ResetToken.username == username, ResetToken.used_at.is_(None))
+    ).all()
+    for old in stale:
+        old.used_at = now
+    if stale:
+        session.add(
+            AuditEvent(
+                actor=ACTOR,
+                action="password_link.revoke",
+                target=username,
+                ticket_id=ticket.id if ticket else None,
+                detail=f"{len(stale)} older link(s) replaced by a new one",
+            )
+        )
     token = secrets.token_urlsafe(32)
     session.add(
         ResetToken(
             token_hash=hash_token(token),
             username=username,
             ticket_id=ticket.id if ticket else None,
-            expires_at=utcnow() + ttl,
+            expires_at=now + ttl,
         )
     )
     session.add(

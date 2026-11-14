@@ -86,6 +86,26 @@ def test_redeem_link_sets_password_once(client, app, directory):
     assert again.status_code == 400
 
 
+def test_a_new_link_cancels_the_older_ones(client, app, directory):
+    post(client, "emma", type="password_reset")
+    post(client, "emma", type="password_reset")
+    newest, oldest = (link_token(m["body"]) for m in inbox(client, "emma")[:2])
+    body = {"new_password": "correct-horse-battery"}
+    old = client.post(f"/api/password-resets/{oldest}", json=body)
+    assert old.status_code == 400
+    assert not directory.authenticate("emma", "correct-horse-battery")
+    assert client.post(f"/api/password-resets/{newest}", json=body).status_code == 204
+    assert ("password_link.revoke", "emma", "1 older link(s) replaced by a new one") in audit(app)
+
+
+def test_a_new_link_leaves_other_peoples_links_alone(client):
+    post(client, "liam", type="password_reset")
+    post(client, "emma", type="password_reset")
+    token = link_token(inbox(client, "liam")[0]["body"])
+    body = {"new_password": "correct-horse-battery"}
+    assert client.post(f"/api/password-resets/{token}", json=body).status_code == 204
+
+
 def test_expired_link_is_rejected(client, app):
     post(client, "emma", type="password_reset")
     token = link_token(inbox(client, "emma")[0]["body"])

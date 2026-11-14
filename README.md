@@ -260,6 +260,7 @@ While a request waits for the manager, the SLA clock is paused, because IT can't
 - The app signs in to the directory with a service account that can only manage `ou=Users`, `ou=Groups` and `ou=Disabled`. It cannot change anything else.
 - Passwords are set with the LDAP password modify operation, so the directory hashes them with Argon2id. The app never stores passwords.
 - API tokens and password links are random 256-bit values, stored only as SHA-256 hashes.
+- Asking for a new password link cancels any older unused link for that account, so only the newest one works.
 - Password links give one generic error for wrong, used or expired links, so they can't be probed.
 - LDAP search filters and names are escaped against injection.
 - Managers can offboard only people who report to them, or accounts their own new hire requests created. IT can offboard anyone.
