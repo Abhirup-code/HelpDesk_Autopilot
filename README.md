@@ -96,6 +96,8 @@ Open the setup link the seed command printed for a user, choose a password, then
 | Manager | Everything above, plus approvals for their team and new hire / offboarding requests |
 | IT agent | The whole queue, status changes, second approval for admin rights, the audit log, and a link to the Grafana dashboard |
 
+The ticket list has a search box and three tabs: Open, Past due and All.
+
 Portal security: directory sign-in, signed session cookies, a CSRF token on every form, a lockout after 5 wrong passwords (logged as `signin.locked`), sign-in redirects that can't leave the site, and a strict Content-Security-Policy with no inline scripts.
 
 The same rules back the API and the portal (`app/services.py`), so the two can't drift apart.

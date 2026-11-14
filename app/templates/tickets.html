@@ -5,9 +5,17 @@
   <h1>{% if user.role.value == "agent" %}IT queue{% else %}My tickets{% endif %}</h1>
   <a class="button" href="/tickets/new">New request</a>
 </div>
+<form method="get" action="/tickets" class="inline search" role="search">
+  <input type="hidden" name="show" value="{{ show }}">
+  <label class="sr-only" for="q">Search tickets</label>
+  <input id="q" name="q" type="search" value="{{ q }}" maxlength="100" placeholder="Search title or description">
+  <button type="submit" class="secondary">Search</button>
+  {% if q %}<a href="/tickets?show={{ show }}">Clear</a>{% endif %}
+</form>
 <p class="tabs">
-  <a href="/tickets?show=open" {% if show == "open" %}aria-current="page"{% endif %}>Open</a>
-  <a href="/tickets?show=all" {% if show == "all" %}aria-current="page"{% endif %}>All</a>
+  {% for key, label in [("open", "Open"), ("overdue", "Past due"), ("all", "All")] %}
+  <a href="/tickets?show={{ key }}{% if q %}&amp;q={{ q | urlencode }}{% endif %}" {% if show == key %}aria-current="page"{% endif %}>{{ label }}</a>
+  {% endfor %}
 </p>
 {% if tickets %}
 <div class="table-wrap">
@@ -28,6 +36,8 @@
 </table>
 </div>
 {% else %}
-<p class="empty">Nothing here. <a href="/tickets/new">Create a request</a>.</p>
+{% if q %}<p class="empty">No tickets match "{{ q }}".</p>
+{% elif show == "overdue" %}<p class="empty">Nothing is past due.</p>
+{% else %}<p class="empty">Nothing here. <a href="/tickets/new">Create a request</a>.</p>{% endif %}
 {% endif %}
 {% endblock %}

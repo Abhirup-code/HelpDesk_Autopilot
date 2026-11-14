@@ -278,16 +278,21 @@ def install_portal(
 
     @router.get("/tickets")
     def tickets_page(
-        request: Request, show: str = "open", session: Session = Depends(get_session)
+        request: Request,
+        show: str = "open",
+        q: str = "",
+        session: Session = Depends(get_session),
     ) -> Response:
         try:
             user = signed_in(request, session)
         except HTTPException as exc:
             return error_page(request, None, exc)
-        tickets = services.list_tickets(session, user)
+        show = show if show in ("open", "overdue", "all") else "open"
+        q = q.strip()[:100]
+        tickets = services.list_tickets(session, user, search=q, overdue=show == "overdue")
         if show == "open":
             tickets = [t for t in tickets if t.status not in services_closed()]
-        return render(request, "tickets.html", user=user, tickets=tickets, show=show)
+        return render(request, "tickets.html", user=user, tickets=tickets, show=show, q=q)
 
     @router.get("/tickets/new")
     def new_ticket_page(request: Request, session: Session = Depends(get_session)) -> Response:

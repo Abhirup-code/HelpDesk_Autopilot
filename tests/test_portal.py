@@ -356,3 +356,35 @@ def test_ticket_pages_show_the_time_left(portal):
     assert "left</span>" in portal.get("/tickets").text
     done = new_ticket(portal, type="password_reset", title="Reset please")
     assert "left</span>" not in done.text  # closed tickets have no countdown
+
+
+# -- search and the past due tab -----------------------------------------------------
+
+
+def test_search_box_finds_tickets_and_keeps_the_words(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Broken dock")
+    new_ticket(portal, type="hardware", title="Sticky keyboard")
+    page = portal.get("/tickets?q=DOCK").text
+    assert "Broken dock" in page and "Sticky keyboard" not in page
+    assert 'value="DOCK"' in page
+    assert 'href="/tickets?show=all&amp;q=DOCK"' in page  # the tabs keep the search
+    nothing = portal.get("/tickets?q=<script>alert(1)</script>").text
+    assert "<script>alert(1)" not in nothing
+    assert "No tickets match" in nothing
+
+
+def test_past_due_tab_lists_only_late_open_tickets(portal, app):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Broken dock")
+    new_ticket(portal, type="hardware", title="Sticky keyboard")
+    assert "Nothing is past due." in portal.get("/tickets?show=overdue").text
+    with app.state.session_factory() as session:
+        late = session.scalar(select(Ticket).where(Ticket.title == "Broken dock"))
+        late.due_at = utcnow() - timedelta(hours=3)
+        session.commit()
+    page = portal.get("/tickets?show=overdue").text
+    assert "Broken dock" in page and "Sticky keyboard" not in page
+    assert "late by 3h 0m" in page
+    # An unknown tab falls back to the open list instead of failing.
+    assert portal.get("/tickets?show=nonsense").status_code == 200
