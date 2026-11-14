@@ -1,12 +1,28 @@
 """The click-through demo is built from the real app, so it is tested like the app."""
 
 import re
+from html.parser import HTMLParser
 
 import pytest
 
 from scripts.build_demo import build
 
 pytestmark = pytest.mark.ui
+
+
+class Tags(HTMLParser):
+    """Collects every start tag with its attributes, using a real HTML parser."""
+
+    def __init__(self, page: str):
+        super().__init__()
+        self.found: list[tuple[str, dict[str, str | None]]] = []
+        self.feed(page)
+
+    def handle_starttag(self, tag, attrs):
+        self.found.append((tag, dict(attrs)))
+
+    def named(self, name: str) -> list[dict[str, str | None]]:
+        return [attrs for tag, attrs in self.found if tag == name]
 
 
 @pytest.fixture(scope="module")
@@ -45,11 +61,12 @@ def test_saved_screens_cannot_reach_a_server_or_leak_a_secret(site):
     for path in out.glob("*.html"):
         page = path.read_text()
         assert "csrf" not in page, path.name
-        assert 'type="hidden"' not in page, path.name
         assert "127.0.0.1" not in page, path.name
         assert "demo-only-password" not in page, path.name
-        assert re.findall(r"<script[^>]*>", page, flags=re.IGNORECASE) == ['<script src="demo.js" defer>'], path.name
-        assert not re.search(r"<form[^>]*\saction=", page), path.name
+        tags = Tags(page)
+        assert tags.named("script") == [{"src": "demo.js", "defer": None}], path.name
+        assert all("action" not in form for form in tags.named("form")), path.name
+        assert all(field.get("type") != "hidden" for field in tags.named("input")), path.name
         assert "form-action 'none'" in page, path.name
         # Random one-time links are replaced with a fixed name.
         assert set(re.findall(r"/reset/[\w-]+", page)) <= {"/reset/one-time-link"}, path.name
