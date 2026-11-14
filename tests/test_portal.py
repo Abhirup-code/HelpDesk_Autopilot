@@ -280,6 +280,23 @@ def test_audit_page_is_for_it_only(portal):
     assert "Dashboard" in page  # agents get the Grafana link
 
 
+def test_it_can_download_the_audit_log_from_the_portal(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="password_reset", title="Locked out")
+    assert portal.get("/audit.csv").status_code == 403
+    submit(portal, "/logout", "/tickets")
+    assert portal.get("/audit.csv").url.path == "/login"
+    sign_in(portal, "ava")
+    assert 'href="/audit.csv?action=&amp;target="' in portal.get("/audit").text
+    assert 'href="/audit.csv?action=group.add&amp;target=em%20ma"' in (
+        portal.get("/audit?action=group.add&target=em ma").text
+    )
+    download = portal.get("/audit.csv?target=emma")
+    assert download.headers["content-type"] == "text/csv; charset=utf-8"
+    assert "password_link.issue,emma" in download.text
+    assert portal.get("/audit.csv?target=nobody").text.count("\n") == 1
+
+
 def test_bad_reset_link_page(portal):
     page = portal.get("/reset/not-a-real-token")
     assert page.status_code == 400

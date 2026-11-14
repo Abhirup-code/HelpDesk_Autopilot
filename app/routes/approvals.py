@@ -1,6 +1,6 @@
 """Approvals for access requests, and the read-only audit log."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app import services
@@ -62,4 +62,32 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         or delete entries, and the database refuses it too."""
         return services.audit_log(session, user, target, action, ticket_id, limit)
 
+    @router.get(
+        "/audit.csv",
+        response_class=Response,
+        responses={
+            200: {"content": {"text/csv": {}}, "description": "The audit log as a CSV file"},
+            403: {"model": ErrorOut, "description": "IT agents only"},
+        },
+    )
+    def audit_log_csv(
+        target: str | None = None,
+        action: str | None = None,
+        ticket_id: int | None = None,
+        limit: int = Query(1000, ge=1, le=10000),
+        user: User = Depends(current_user),
+        session: Session = Depends(get_session),
+    ) -> Response:
+        """The same log as a file for auditors. Takes the same filters as /api/audit."""
+        events = services.audit_log(session, user, target, action, ticket_id, limit)
+        return csv_download(services.audit_csv(events))
+
     return router
+
+
+def csv_download(body: str) -> Response:
+    return Response(
+        body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="audit-log.csv"'},
+    )

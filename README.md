@@ -309,6 +309,7 @@ Run the end-to-end test on your own machine with `scripts/e2e.sh`.
 | GET | `/api/approvals` | Manager or agent | Requests waiting for your decision |
 | POST | `/api/approvals/{id}` | Approver | Approve, or reject with a reason |
 | GET | `/api/audit` | Agent | Audit log, newest first. Filter with `target`, `action`, `ticket_id`, `limit` |
+| GET | `/api/audit.csv` | Agent | The same log as a CSV file for auditors, with the same filters. Cells that could run as spreadsheet formulas are neutralized |
 
 ## Run the tests
 

@@ -28,6 +28,7 @@ from app import services
 from app.directory import Directory
 from app.models import AuditEvent, Role, Status, TicketType, User, aware, utcnow
 from app.policy import DEPARTMENTS, MIN_PASSWORD_LENGTH, REQUESTABLE_GROUPS
+from app.routes.approvals import csv_download
 from app.schemas import TicketCreate
 
 HERE = os.path.dirname(__file__)
@@ -438,6 +439,21 @@ def install_portal(
         except HTTPException as exc:
             return error_page(request, user, exc)
         return render(request, "audit.html", user=user, events=events, action=action, target=target)
+
+    @router.get("/audit.csv")
+    def audit_download(
+        request: Request,
+        action: str | None = None,
+        target: str | None = None,
+        session: Session = Depends(get_session),
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+            events = services.audit_log(session, user, target or None, action or None, None, 10000)
+        except HTTPException as exc:
+            return error_page(request, user, exc)
+        return csv_download(services.audit_csv(events))
 
     @router.get("/reset/{token}")
     def reset_page(

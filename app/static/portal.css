@@ -83,3 +83,4 @@ td.num { font-variant-numeric: tabular-nums; color: var(--muted); }
 .message .body { white-space: pre-line; overflow-wrap: anywhere; }
 code { font-size: 13px; background: color-mix(in srgb, var(--muted) 12%, transparent); padding: 1px 6px; border-radius: 4px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.download { padding: 9px 0; font-weight: 600; }

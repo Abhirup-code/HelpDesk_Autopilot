@@ -4,6 +4,9 @@ Each function checks permissions and raises HTTPException with the same status
 codes in both places, so the rules can't drift apart between the two front ends.
 """
 
+import csv
+import io
+
 from fastapi import HTTPException, status
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
@@ -300,3 +303,26 @@ def audit_log(
     if ticket_id is not None:
         query = query.where(AuditEvent.ticket_id == ticket_id)
     return list(session.scalars(query))
+
+
+AUDIT_CSV_COLUMNS = ["when_utc", "who", "action", "user", "ticket", "detail"]
+# A cell that starts with one of these runs as a formula when the file is opened in
+# Excel or Google Sheets. Audit text comes from people (ticket reasons, usernames).
+FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_cell(value: object) -> str:
+    text = "" if value is None else str(value)
+    return f"'{text}" if text.startswith(FORMULA_STARTS) else text
+
+
+def audit_csv(events: list[AuditEvent]) -> str:
+    """The audit log as CSV for auditors: one row per entry, newest first."""
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(AUDIT_CSV_COLUMNS)
+    for e in events:
+        when = aware(e.at).strftime("%Y-%m-%dT%H:%M:%SZ")
+        row = [when, e.actor, e.action, e.target, e.ticket_id, e.detail]
+        writer.writerow([csv_cell(value) for value in row])
+    return out.getvalue()
