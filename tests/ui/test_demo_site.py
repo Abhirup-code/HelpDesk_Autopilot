@@ -48,7 +48,7 @@ def test_saved_screens_cannot_reach_a_server_or_leak_a_secret(site):
         assert 'type="hidden"' not in page, path.name
         assert "127.0.0.1" not in page, path.name
         assert "demo-only-password" not in page, path.name
-        assert re.findall(r"<script[^>]*>", page) == ['<script src="demo.js" defer>'], path.name
+        assert re.findall(r"<script[^>]*>", page, flags=re.IGNORECASE) == ['<script src="demo.js" defer>'], path.name
         assert not re.search(r"<form[^>]*\saction=", page), path.name
         assert "form-action 'none'" in page, path.name
         # Random one-time links are replaced with a fixed name.
