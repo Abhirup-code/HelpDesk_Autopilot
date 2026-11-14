@@ -255,6 +255,8 @@ Requestable groups: erp-users, finance-share, git-users, helpdesk-agents, it-adm
 
 While a request waits for the manager, the SLA clock is paused, because IT can't act yet.
 
+Every open ticket shows the time left on its SLA ("2h 5m left", "late by 40m", "paused, 1d 3h left"), and the API returns it as `sla_seconds_left`.
+
 ## Security choices
 
 - The app signs in to the directory with a service account that can only manage `ou=Users`, `ou=Groups` and `ou=Disabled`. It cannot change anything else.

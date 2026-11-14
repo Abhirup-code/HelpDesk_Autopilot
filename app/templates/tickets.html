@@ -21,7 +21,7 @@
     <td>{{ TYPE_LABELS[t.type.value] }}</td>
     <td><span class="prio prio-{{ t.priority.value }}">{{ t.priority.value }}</span></td>
     <td><span class="pill s-{{ t.status.value }}">{{ STATUS_LABELS[t.status.value] }}</span></td>
-    <td>{{ t.due_at | when }}{% if t.is_breached() %} <span class="late">Late</span>{% endif %}</td>
+    <td>{{ t.due_at | when }}{% if t | time_left %} <span class="{{ 'late' if t.is_breached() else 'left' }}">{{ t | time_left }}</span>{% elif t.is_breached() %} <span class="late">Closed late</span>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>

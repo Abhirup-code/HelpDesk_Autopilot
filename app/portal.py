@@ -69,7 +69,30 @@ def when(dt) -> str:
     return aware(dt).strftime("%b %d, %H:%M UTC") if dt else ""
 
 
-templates.env.filters.update(linkify=linkify, when=when)
+def span(seconds: int) -> str:
+    """A length of time in the two biggest units that matter: 3d 4h, 2h 5m, 12m."""
+    minutes = abs(seconds) // 60
+    days, hours, minutes = minutes // 1440, minutes % 1440 // 60, minutes % 60
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m" if minutes else "under 1m"
+
+
+def time_left(ticket) -> str:
+    """What the SLA clock says, in words: "2h 5m left", "late by 40m", "paused, 1d 3h left"."""
+    seconds = ticket.seconds_left()
+    if seconds is None:
+        return ""
+    if seconds < 0:
+        return f"late by {span(seconds)}"
+    return (
+        f"paused, {span(seconds)} left" if ticket.paused_at is not None else f"{span(seconds)} left"
+    )
+
+
+templates.env.filters.update(linkify=linkify, when=when, time_left=time_left)
 templates.env.globals.update(TYPE_LABELS=TYPE_LABELS, STATUS_LABELS=STATUS_LABELS)
 
 

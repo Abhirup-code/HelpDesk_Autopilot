@@ -26,6 +26,7 @@ def serialize(ticket: Ticket) -> TicketOut:
         due_at=ticket.due_at,
         resolved_at=ticket.resolved_at,
         sla_breached=ticket.is_breached(),
+        sla_seconds_left=ticket.seconds_left(),
         details=ticket.details or {},
         automation_error=ticket.automation_error,
     )

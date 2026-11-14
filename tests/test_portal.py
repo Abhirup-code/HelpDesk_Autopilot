@@ -2,13 +2,14 @@
 
 import html
 import re
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.models import AuditEvent
-from app.portal import friendly, linkify, safe_next
+from app.models import AuditEvent, Status, Ticket, utcnow
+from app.portal import friendly, linkify, safe_next, span, time_left
 
 PASSWORDS = {"emma": "emma-password-1", "liam": "liam-password-1", "ava": "ava-password-1"}
 
@@ -297,3 +298,44 @@ def test_friendly_error_names_the_field():
     error = {"loc": ("body", "details", "first_name"), "msg": "Value error, bad"}
     assert friendly(error) == "First name: bad"
     assert friendly({"loc": ("x",), "msg": "oops"}) == "This form: oops"
+
+
+# -- time left on the SLA -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("seconds", "text"),
+    [
+        (20, "under 1m"),
+        (12 * 60, "12m"),
+        (2 * 3600 + 300, "2h 5m"),
+        (3 * 86400 + 4 * 3600, "3d 4h"),
+    ],
+)
+def test_span_uses_the_two_biggest_units(seconds, text):
+    assert span(seconds) == text
+    assert span(-seconds) == text
+
+
+def test_time_left_in_words():
+    now = utcnow()
+    soon = Ticket(due_at=now + timedelta(hours=2, minutes=5, seconds=30), status=Status.NEW)
+    assert time_left(soon) == "2h 5m left"
+    late = Ticket(due_at=now - timedelta(minutes=40, seconds=30), status=Status.IN_PROGRESS)
+    assert time_left(late) == "late by 40m"
+    paused = Ticket(
+        due_at=now + timedelta(hours=5),
+        paused_at=now - timedelta(hours=1),
+        status=Status.WAITING_APPROVAL,
+    )
+    assert time_left(paused) == "paused, 6h 0m left"
+    assert time_left(Ticket(due_at=now, status=Status.RESOLVED)) == ""
+
+
+def test_ticket_pages_show_the_time_left(portal):
+    sign_in(portal, "emma")
+    page = new_ticket(portal, type="hardware", title="Broken dock")
+    assert re.search(r'<span class="left">[\w ]+ left</span>', page.text)
+    assert "left</span>" in portal.get("/tickets").text
+    done = new_ticket(portal, type="password_reset", title="Reset please")
+    assert "left</span>" not in done.text  # closed tickets have no countdown

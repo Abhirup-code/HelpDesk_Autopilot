@@ -106,6 +106,16 @@ class Ticket(Base):
             return aware(self.paused_at) > due
         return (now or utcnow()) > due
 
+    def seconds_left(self, now: datetime | None = None) -> int | None:
+        """Seconds until the ticket is due; negative once it is late. None when closed.
+
+        While the SLA clock is paused, the time left stays where it was at the pause.
+        """
+        if self.status in CLOSED_STATUSES:
+            return None
+        at = aware(self.paused_at) if self.paused_at is not None else (now or utcnow())
+        return int((aware(self.due_at) - at).total_seconds())
+
     def work_start(self) -> datetime:
         """When work on the ticket could begin.
 

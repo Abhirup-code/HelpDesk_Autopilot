@@ -73,6 +73,7 @@ td.num { font-variant-numeric: tabular-nums; color: var(--muted); }
 .prio { font-weight: 700; font-size: 12px; font-variant-numeric: tabular-nums; }
 .prio-P1 { color: var(--danger); } .prio-P2 { color: var(--warn); }
 .late { color: var(--danger); font-weight: 700; font-size: 12px; }
+.left { color: var(--muted); font-size: 12px; white-space: nowrap; }
 
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; margin: 12px 0; }
 .facts dt { color: var(--muted); }

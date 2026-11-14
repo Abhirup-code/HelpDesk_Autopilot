@@ -12,7 +12,7 @@
     <dt>Priority</dt><dd><span class="prio prio-{{ ticket.priority.value }}">{{ ticket.priority.value }}</span></dd>
     <dt>Requested by</dt><dd>{{ ticket.requester.full_name }}</dd>
     <dt>Created</dt><dd>{{ ticket.created_at | when }}</dd>
-    <dt>Due</dt><dd>{{ ticket.due_at | when }}{% if breached %} <span class="late">Past due</span>{% endif %}</dd>
+    <dt>Due</dt><dd>{{ ticket.due_at | when }}{% if ticket | time_left %} <span class="{{ 'late' if breached else 'left' }}">{{ ticket | time_left }}</span>{% elif breached %} <span class="late">Closed late</span>{% endif %}</dd>
     {% if ticket.resolved_at %}<dt>Closed</dt><dd>{{ ticket.resolved_at | when }}</dd>{% endif %}
     {% for key, value in (ticket.details or {}).items() if key != "demo" %}
     <dt>{{ key.replace('_', ' ') | capitalize }}</dt><dd>{{ value }}</dd>
