@@ -59,16 +59,35 @@ def list_tickets(
     return list(session.scalars(query))
 
 
+def on_team(session: Session, manager: User, username: str) -> bool:
+    """True if the account belongs to someone who reports to this manager, or was
+    created by one of the manager's own new hire requests."""
+    person = session.scalar(select(User).where(User.username == username))
+    if person is not None:
+        return person.manager_id == manager.id
+    hires = session.scalars(
+        select(Ticket).where(Ticket.type == TicketType.NEW_HIRE, Ticket.requester_id == manager.id)
+    )
+    return any((t.details or {}).get("username") == username for t in hires)
+
+
 def create_ticket(
     session: Session, directory: Directory, base_url: str, user: User, body: TicketCreate
 ) -> Ticket:
     if body.type in PEOPLE_CHANGES and user.role == Role.EMPLOYEE:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only managers and IT can request this")
-    if body.type == TicketType.OFFBOARDING and not directory.user_exists(body.details["username"]):
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            f"No directory account named {body.details['username']}",
-        )
+    if body.type == TicketType.OFFBOARDING:
+        username = body.details["username"]
+        if not directory.user_exists(username):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, f"No directory account named {username}"
+            )
+        if user.role == Role.MANAGER and not on_team(session, user, username):
+            # Without this, any manager could switch off any account in the company.
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "You can only offboard people on your own team. Ask IT for anyone else.",
+            )
     now = utcnow()
     priority = body.priority or sla.default_priority(body.type)
     ticket = Ticket(

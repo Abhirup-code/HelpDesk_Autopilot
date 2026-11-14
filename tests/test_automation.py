@@ -291,6 +291,38 @@ def test_employee_cannot_offboard_people(client):
     assert post(client, "emma", **offboarding(username="liam")).status_code == 403
 
 
+def test_manager_cannot_offboard_someone_outside_their_team(client, directory):
+    # Ava works in IT and does not report to Liam.
+    response = post(client, "liam", **offboarding(username="ava"))
+    assert response.status_code == 403
+    assert "your own team" in response.json()["detail"]
+    assert not directory.is_disabled("ava")
+
+
+def test_manager_can_offboard_their_own_new_hire(client, directory):
+    hire = post(
+        client,
+        "liam",
+        type="new_hire",
+        details={
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "department": "Finance",
+            "start_date": str(TODAY),
+        },
+    ).json()
+    username = hire["details"]["username"]
+    # Jane has no portal account yet, but Liam's own request created her.
+    body = post(client, "liam", **offboarding(username=username)).json()
+    assert body["status"] == "auto_resolved"
+    assert directory.is_disabled(username)
+
+
+def test_it_can_offboard_anyone(client, directory):
+    assert post(client, "ava", **offboarding(username="liam")).json()["status"] == "auto_resolved"
+    assert directory.is_disabled("liam")
+
+
 def test_only_agents_can_run_automations(client):
     assert client.post("/api/automation/run-due", headers=auth("liam")).status_code == 403
 

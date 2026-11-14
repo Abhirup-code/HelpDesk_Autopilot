@@ -196,7 +196,7 @@ Then open http://127.0.0.1:8000. The saved pages can't reach a server: scripts, 
 |---|---|---|
 | `password_reset` | Anyone | A one-time link (15 minutes, works once) goes to your inbox. Ticket auto-resolves |
 | `new_hire` | Manager or IT | Directory account created with the department's groups. The manager gets the username and a 72-hour set-password link |
-| `offboarding` | Manager or IT | After the last day ends: all groups removed, password removed, account moved to `ou=Disabled` |
+| `offboarding` | Manager (own team only) or IT | After the last day ends: all groups removed, password removed, account moved to `ou=Disabled` |
 | `access_request` | Anyone | Goes to your manager. `it-admins` also needs an IT agent. Approved groups are added automatically |
 | `hardware` | Anyone | Goes to the IT queue |
 
@@ -262,6 +262,7 @@ While a request waits for the manager, the SLA clock is paused, because IT can't
 - API tokens and password links are random 256-bit values, stored only as SHA-256 hashes.
 - Password links give one generic error for wrong, used or expired links, so they can't be probed.
 - LDAP search filters and names are escaped against injection.
+- Managers can offboard only people who report to them, or accounts their own new hire requests created. IT can offboard anyone.
 - Separation of duties: nobody can approve their own access request, and admin rights always need both a manager and an IT agent.
 - The audit log is append-only. The API has no way to change it, and database triggers refuse any UPDATE or DELETE on it.
 - Blocked attempts are logged too: trying to approve your own request leaves an `approval.denied` record.
