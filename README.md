@@ -4,6 +4,8 @@
 
 A self-service IT help desk that automates the most common tickets (new-hire setup, offboarding and password resets) against a company directory, with manager approvals, a full audit trail and a live SLA dashboard.
 
+**[Try the live demo →](https://abhirupkhan.me/demo/helpdesk/)** Click through a password reset, a manager approval and the audit log in your browser. No install, no sign-up.
+
 > **Status:** in development. See the [roadmap](#roadmap).
 
 ## Screenshots
@@ -177,6 +179,17 @@ Grafana reads ticket history from PostgreSQL with a read-only login that can onl
 
 Demo tickets follow the ticket mix from the BRD's 30-day review and are marked `"demo": true`. They never touch the directory.
 
+## Live demo
+
+The [live demo](https://abhirupkhan.me/demo/helpdesk/) is 13 screens saved from the real app, not a mock-up. `scripts/build_demo.py` starts the app, signs in with a real browser, clicks through the story, and saves each screen as a plain HTML page:
+
+```bash
+python scripts/build_demo.py --out demo
+python -m http.server --directory demo
+```
+
+Then open http://127.0.0.1:8000. The saved pages can't reach a server: scripts, hidden fields and form actions are removed, and a strict Content-Security-Policy allows only the demo's own CSS and JS. The browser tests rebuild the demo on every pull request, so it can't drift from the app.
+
 ## What the automations do
 
 | Ticket type | Who can file it | What happens |
@@ -265,7 +278,7 @@ Every pull request runs:
 | Tests (sqlite), Tests (postgres) | 130+ tests with a 90% coverage gate, on both databases, including every dashboard query |
 | Monitoring config | promtool checks the Prometheus config and unit tests the alert rules |
 | Build and scan images | Builds both images, checks they run as non-root, and fails on fixable HIGH or CRITICAL vulnerabilities (Trivy) |
-| UI tests (Playwright) | Real Chromium clicks through password reset, approvals, the request form and IT views; screenshots are kept as build artifacts |
+| UI tests (Playwright) | Real Chromium clicks through password reset, approvals, the request form and IT views, and rebuilds the click-through demo; screenshots are kept as build artifacts |
 | End-to-end (Docker Compose) | Starts the whole stack and tests portal sign-in, password reset, new hire, approvals, self-approval block, audit log protection, Prometheus and Grafana |
 | Secret scanning (gitleaks) | Scans the full git history |
 | Dependency audit (pip-audit), Dependency review | Known vulnerabilities in Python packages |
