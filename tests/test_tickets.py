@@ -23,6 +23,34 @@ def test_health(client):
     assert response.headers["Cache-Control"] == "no-store"
 
 
+def test_ready_when_database_and_directory_answer(client):
+    response = client.get("/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "database": "ok", "directory": "ok"}
+
+
+def test_not_ready_when_the_directory_is_down(client, directory, monkeypatch):
+    def broken(username):
+        raise ConnectionError("ldap://dc01.corp.internal refused the connection")
+
+    monkeypatch.setattr(directory, "user_exists", broken)
+    response = client.get("/ready")
+    assert response.status_code == 503
+    assert response.json() == {"status": "not ready", "database": "ok", "directory": "down"}
+    assert "corp.internal" not in response.text  # the error text stays private
+    assert client.get("/health").status_code == 200  # the process itself is still up
+
+
+def test_not_ready_when_the_database_is_down(client, app, monkeypatch):
+    def broken():
+        raise RuntimeError("database is gone")
+
+    monkeypatch.setattr(app.state, "session_factory", broken)
+    response = client.get("/ready")
+    assert response.status_code == 503
+    assert response.json()["database"] == "down"
+
+
 def test_create_ticket_uses_default_priority_and_due_time(client):
     response = create(client)
     assert response.status_code == 201

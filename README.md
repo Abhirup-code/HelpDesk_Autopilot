@@ -295,7 +295,8 @@ Run the end-to-end test on your own machine with `scripts/e2e.sh`.
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/health` | Anyone | Health check |
+| GET | `/health` | Anyone | Is the process up? |
+| GET | `/ready` | Anyone | Can it do real work? Checks the database and the directory; 503 if either is down |
 | POST | `/api/tickets` | Signed in | Create a ticket. Automations run right away |
 | GET | `/api/tickets` | Signed in | Employees see their own tickets, IT agents see all. Filter with `status`, `type`, `priority` |
 | GET | `/api/tickets/{id}` | Owner or agent | One ticket. Other people's tickets return 404 |

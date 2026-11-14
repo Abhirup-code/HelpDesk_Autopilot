@@ -3,6 +3,7 @@
 import os
 
 from fastapi import FastAPI, Request, Response
+from sqlalchemy import text
 
 from app.auth import make_current_user
 from app.db import init_db, make_engine, make_session_factory, session_dependency
@@ -43,6 +44,29 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/ready", responses={503: {"description": "The database or directory is down"}})
+    def ready(response: Response) -> dict[str, str]:
+        """Can this instance do real work? Checks the database and the directory.
+
+        /health only says the process is up. A load balancer should use /ready, so an
+        instance that has lost its database or directory stops getting traffic.
+        """
+        checks = {"database": "ok", "directory": "ok"}
+        try:
+            with app.state.session_factory() as session:
+                session.execute(text("SELECT 1"))
+        except Exception:  # any failure at all means not ready
+            checks["database"] = "down"
+        try:
+            directory.user_exists("readiness-check")
+        except Exception:
+            checks["directory"] = "down"
+        is_ready = all(state == "ok" for state in checks.values())
+        if not is_ready:
+            response.status_code = 503
+        # Only "ok" or "down" is returned, never the error text, which could leak hostnames.
+        return {"status": "ready" if is_ready else "not ready", **checks}
 
     app.include_router(tickets.build_router(get_session, current_user, directory, base_url))
     app.include_router(accounts.build_router(get_session, current_user, directory, base_url))
