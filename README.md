@@ -298,7 +298,7 @@ Run the end-to-end test on your own machine with `scripts/e2e.sh`.
 | GET | `/health` | Anyone | Is the process up? |
 | GET | `/ready` | Anyone | Can it do real work? Checks the database and the directory; 503 if either is down |
 | POST | `/api/tickets` | Signed in | Create a ticket. Automations run right away |
-| GET | `/api/tickets` | Signed in | Employees see their own tickets, IT agents see all. Filter with `status`, `type`, `priority`, `q` (words in the title or description) and `overdue=true` |
+| GET | `/api/tickets` | Signed in | Employees see their own tickets, IT agents see all. Filter with `status`, `type`, `priority`, `q` (words in the title or description) and `overdue=true`. Pages with `limit` (default 100) and `offset`; the `X-Total-Count` header has the full count |
 | GET | `/api/tickets/{id}` | Owner or agent | One ticket. Other people's tickets return 404 |
 | PATCH | `/api/tickets/{id}/status` | Agent | Set status to `new`, `in_progress` or `resolved`. The change goes in the audit log, and resolving records the time |
 | GET | `/api/inbox` | Signed in | Your messages (stands in for email in the demo) |

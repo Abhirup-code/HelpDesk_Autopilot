@@ -5,7 +5,7 @@ codes in both places, so the rules can't drift apart between the two front ends.
 """
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app import sla
@@ -92,9 +92,21 @@ def list_tickets(
     priority=None,
     search: str | None = None,
     overdue: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[Ticket]:
     query = ticket_query(user, status_filter, type_filter, priority, search, overdue)
-    return list(session.scalars(query.order_by(Ticket.due_at, Ticket.id)))
+    # The id breaks ties, so pages never repeat or skip a ticket with the same due time.
+    query = query.order_by(Ticket.due_at, Ticket.id).offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
+    return list(session.scalars(query))
+
+
+def count_tickets(session: Session, user: User, *filters, **named) -> int:
+    """How many tickets match, across all pages. Takes the same filters as list_tickets."""
+    matching = ticket_query(user, *filters, **named).subquery()
+    return session.scalar(select(func.count()).select_from(matching)) or 0
 
 
 def on_team(session: Session, manager: User, username: str) -> bool:

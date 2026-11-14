@@ -247,3 +247,25 @@ def test_a_ticket_paused_before_it_was_due_is_not_overdue(client, app):
         ticket.paused_at = utcnow() - timedelta(hours=2)
         session.commit()
     assert client.get("/api/tickets?overdue=true", headers=auth("ava")).json() == []
+
+
+def test_the_list_comes_in_pages_with_a_total(client):
+    for n in range(5):
+        create(client, title=f"Ticket {n}")
+    first = client.get("/api/tickets?limit=2", headers=auth("emma"))
+    assert [t["title"] for t in first.json()] == ["Ticket 0", "Ticket 1"]
+    assert first.headers["X-Total-Count"] == "5"
+    last = client.get("/api/tickets?limit=2&offset=4", headers=auth("emma"))
+    assert [t["title"] for t in last.json()] == ["Ticket 4"]
+    assert client.get("/api/tickets?offset=9", headers=auth("emma")).json() == []
+    # The total follows the filters, and only counts what the person may see.
+    create(client, who="liam", title="Ticket from Liam")
+    searched = client.get("/api/tickets?q=ticket 3", headers=auth("emma"))
+    assert searched.headers["X-Total-Count"] == "1"
+    assert client.get("/api/tickets", headers=auth("emma")).headers["X-Total-Count"] == "5"
+    assert client.get("/api/tickets", headers=auth("ava")).headers["X-Total-Count"] == "6"
+
+
+@pytest.mark.parametrize("query", ["limit=0", "limit=501", "offset=-1"])
+def test_page_sizes_out_of_range_are_rejected(client, query):
+    assert client.get(f"/api/tickets?{query}", headers=auth("emma")).status_code == 422
