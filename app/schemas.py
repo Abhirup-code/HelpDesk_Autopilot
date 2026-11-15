@@ -85,6 +85,10 @@ class TicketOut(BaseModel):
     due_at: datetime
     resolved_at: datetime | None
     sla_breached: bool
+    sla_seconds_left: int | None = Field(
+        description="Seconds until due, negative when late, null when closed. "
+        "Stays fixed while the ticket waits for a manager."
+    )
     details: dict
     automation_error: str | None
 

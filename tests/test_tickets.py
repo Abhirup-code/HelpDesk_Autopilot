@@ -1,5 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
+import pytest
+
+from app.models import Ticket, utcnow
 from tests.conftest import auth
 
 NEW_TICKET = {
@@ -19,6 +22,34 @@ def test_health(client):
     assert response.json() == {"status": "ok"}
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_ready_when_database_and_directory_answer(client):
+    response = client.get("/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "database": "ok", "directory": "ok"}
+
+
+def test_not_ready_when_the_directory_is_down(client, directory, monkeypatch):
+    def broken(username):
+        raise ConnectionError("ldap://dc01.corp.internal refused the connection")
+
+    monkeypatch.setattr(directory, "user_exists", broken)
+    response = client.get("/ready")
+    assert response.status_code == 503
+    assert response.json() == {"status": "not ready", "database": "ok", "directory": "down"}
+    assert "corp.internal" not in response.text  # the error text stays private
+    assert client.get("/health").status_code == 200  # the process itself is still up
+
+
+def test_not_ready_when_the_database_is_down(client, app, monkeypatch):
+    def broken():
+        raise RuntimeError("database is gone")
+
+    monkeypatch.setattr(app.state, "session_factory", broken)
+    response = client.get("/ready")
+    assert response.status_code == 503
+    assert response.json()["database"] == "down"
 
 
 def test_create_ticket_uses_default_priority_and_due_time(client):
@@ -131,3 +162,110 @@ def test_employee_cannot_change_status(client):
         f"/api/tickets/{ticket_id}/status", json={"status": "resolved"}, headers=auth("emma")
     )
     assert response.status_code == 403
+
+
+def test_status_changes_by_hand_are_in_the_audit_log(client):
+    ticket_id = create(client).json()["id"]
+    url = f"/api/tickets/{ticket_id}/status"
+    client.patch(url, json={"status": "in_progress"}, headers=auth("ava"))
+    client.patch(url, json={"status": "resolved"}, headers=auth("ava"))
+    # Setting the same status again changes nothing and adds no entry.
+    client.patch(url, json={"status": "resolved"}, headers=auth("ava"))
+    log = client.get(f"/api/audit?ticket_id={ticket_id}", headers=auth("ava")).json()
+    changes = [(e["actor"], e["action"], e["target"], e["detail"]) for e in reversed(log)]
+    assert changes == [
+        ("ava", "ticket.status", "emma", "new -> in_progress"),
+        ("ava", "ticket.status", "emma", "in_progress -> resolved"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "status", ["auto_resolved", "waiting_approval", "waiting_it_approval", "rejected"]
+)
+def test_statuses_that_belong_to_approvals_and_automations_cannot_be_set_by_hand(client, status):
+    ticket_id = create(client).json()["id"]
+    response = client.patch(
+        f"/api/tickets/{ticket_id}/status", json={"status": status}, headers=auth("ava")
+    )
+    assert response.status_code == 422
+    assert "new, in_progress, resolved" in response.json()["detail"]
+    assert client.get(f"/api/tickets/{ticket_id}", headers=auth("ava")).json()["status"] == "new"
+
+
+def test_search_matches_title_or_description_and_ignores_capitals(client):
+    create(client, title="Laptop will not charge", description="Battery is at 3%")
+    create(client, title="Need a monitor", description="For the new LAPTOP dock")
+    create(client, title="Keyboard is sticky", description="Spilled coffee")
+    found = client.get("/api/tickets?q=laptop", headers=auth("emma")).json()
+    assert {t["title"] for t in found} == {"Laptop will not charge", "Need a monitor"}
+    # "%" is searched as a character, not as a wildcard.
+    assert len(client.get("/api/tickets?q=3%25", headers=auth("emma")).json()) == 1
+    assert client.get("/api/tickets?q=%25", headers=auth("emma")).json()[0]["title"] == (
+        "Laptop will not charge"
+    )
+
+
+def test_search_never_shows_other_peoples_tickets(client):
+    create(client, who="liam", title="Liam's secret laptop")
+    assert client.get("/api/tickets?q=laptop", headers=auth("emma")).json() == []
+    assert len(client.get("/api/tickets?q=laptop", headers=auth("ava")).json()) == 1
+
+
+def test_overdue_filter_finds_open_tickets_past_due(client, app):
+    late_id = create(client, title="Late one").json()["id"]
+    closed_late_id = create(client, title="Closed late").json()["id"]
+    create(client, title="On time")
+    with app.state.session_factory() as session:
+        for ticket_id in (late_id, closed_late_id):
+            ticket = session.get(Ticket, ticket_id)
+            ticket.due_at = utcnow() - timedelta(hours=2)
+        session.commit()
+    client.patch(
+        f"/api/tickets/{closed_late_id}/status", json={"status": "resolved"}, headers=auth("ava")
+    )
+    overdue = client.get("/api/tickets?overdue=true", headers=auth("ava")).json()
+    assert [t["title"] for t in overdue] == ["Late one"]
+    assert overdue[0]["sla_breached"] is True
+
+
+def test_a_ticket_paused_before_it_was_due_is_not_overdue(client, app):
+    body = client.post(
+        "/api/tickets",
+        json={
+            "type": "access_request",
+            "title": "Need Tableau",
+            "description": "Reports",
+            "details": {"group": "tableau-users"},
+        },
+        headers=auth("emma"),
+    ).json()
+    assert body["status"] == "waiting_approval"
+    with app.state.session_factory() as session:
+        ticket = session.get(Ticket, body["id"])
+        # Paused an hour before it was due, and the due time has since passed.
+        ticket.due_at = utcnow() - timedelta(hours=1)
+        ticket.paused_at = utcnow() - timedelta(hours=2)
+        session.commit()
+    assert client.get("/api/tickets?overdue=true", headers=auth("ava")).json() == []
+
+
+def test_the_list_comes_in_pages_with_a_total(client):
+    for n in range(5):
+        create(client, title=f"Ticket {n}")
+    first = client.get("/api/tickets?limit=2", headers=auth("emma"))
+    assert [t["title"] for t in first.json()] == ["Ticket 0", "Ticket 1"]
+    assert first.headers["X-Total-Count"] == "5"
+    last = client.get("/api/tickets?limit=2&offset=4", headers=auth("emma"))
+    assert [t["title"] for t in last.json()] == ["Ticket 4"]
+    assert client.get("/api/tickets?offset=9", headers=auth("emma")).json() == []
+    # The total follows the filters, and only counts what the person may see.
+    create(client, who="liam", title="Ticket from Liam")
+    searched = client.get("/api/tickets?q=ticket 3", headers=auth("emma"))
+    assert searched.headers["X-Total-Count"] == "1"
+    assert client.get("/api/tickets", headers=auth("emma")).headers["X-Total-Count"] == "5"
+    assert client.get("/api/tickets", headers=auth("ava")).headers["X-Total-Count"] == "6"
+
+
+@pytest.mark.parametrize("query", ["limit=0", "limit=501", "offset=-1"])
+def test_page_sizes_out_of_range_are_rejected(client, query):
+    assert client.get(f"/api/tickets?{query}", headers=auth("emma")).status_code == 422

@@ -2,13 +2,14 @@
 
 import html
 import re
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.models import AuditEvent
-from app.portal import friendly, linkify, safe_next
+from app.models import AuditEvent, Status, Ticket, utcnow
+from app.portal import friendly, linkify, safe_next, span, time_left
 
 PASSWORDS = {"emma": "emma-password-1", "liam": "liam-password-1", "ava": "ava-password-1"}
 
@@ -279,6 +280,23 @@ def test_audit_page_is_for_it_only(portal):
     assert "Dashboard" in page  # agents get the Grafana link
 
 
+def test_it_can_download_the_audit_log_from_the_portal(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="password_reset", title="Locked out")
+    assert portal.get("/audit.csv").status_code == 403
+    submit(portal, "/logout", "/tickets")
+    assert portal.get("/audit.csv").url.path == "/login"
+    sign_in(portal, "ava")
+    assert 'href="/audit.csv?action=&amp;target="' in portal.get("/audit").text
+    assert 'href="/audit.csv?action=group.add&amp;target=em%20ma"' in (
+        portal.get("/audit?action=group.add&target=em ma").text
+    )
+    download = portal.get("/audit.csv?target=emma")
+    assert download.headers["content-type"] == "text/csv; charset=utf-8"
+    assert "password_link.issue,emma" in download.text
+    assert portal.get("/audit.csv?target=nobody").text.count("\n") == 1
+
+
 def test_bad_reset_link_page(portal):
     page = portal.get("/reset/not-a-real-token")
     assert page.status_code == 400
@@ -297,3 +315,76 @@ def test_friendly_error_names_the_field():
     error = {"loc": ("body", "details", "first_name"), "msg": "Value error, bad"}
     assert friendly(error) == "First name: bad"
     assert friendly({"loc": ("x",), "msg": "oops"}) == "This form: oops"
+
+
+# -- time left on the SLA -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("seconds", "text"),
+    [
+        (20, "under 1m"),
+        (12 * 60, "12m"),
+        (2 * 3600 + 300, "2h 5m"),
+        (3 * 86400 + 4 * 3600, "3d 4h"),
+    ],
+)
+def test_span_uses_the_two_biggest_units(seconds, text):
+    assert span(seconds) == text
+    assert span(-seconds) == text
+
+
+def test_time_left_in_words():
+    now = utcnow()
+    soon = Ticket(due_at=now + timedelta(hours=2, minutes=5, seconds=30), status=Status.NEW)
+    assert time_left(soon) == "2h 5m left"
+    late = Ticket(due_at=now - timedelta(minutes=40, seconds=30), status=Status.IN_PROGRESS)
+    assert time_left(late) == "late by 40m"
+    paused = Ticket(
+        due_at=now + timedelta(hours=5),
+        paused_at=now - timedelta(hours=1),
+        status=Status.WAITING_APPROVAL,
+    )
+    assert time_left(paused) == "paused, 6h 0m left"
+    assert time_left(Ticket(due_at=now, status=Status.RESOLVED)) == ""
+
+
+def test_ticket_pages_show_the_time_left(portal):
+    sign_in(portal, "emma")
+    page = new_ticket(portal, type="hardware", title="Broken dock")
+    assert re.search(r'<span class="left">[\w ]+ left</span>', page.text)
+    assert "left</span>" in portal.get("/tickets").text
+    done = new_ticket(portal, type="password_reset", title="Reset please")
+    assert "left</span>" not in done.text  # closed tickets have no countdown
+
+
+# -- search and the past due tab -----------------------------------------------------
+
+
+def test_search_box_finds_tickets_and_keeps_the_words(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Broken dock")
+    new_ticket(portal, type="hardware", title="Sticky keyboard")
+    page = portal.get("/tickets?q=DOCK").text
+    assert "Broken dock" in page and "Sticky keyboard" not in page
+    assert 'value="DOCK"' in page
+    assert 'href="/tickets?show=all&amp;q=DOCK"' in page  # the tabs keep the search
+    nothing = portal.get("/tickets?q=<script>alert(1)</script>").text
+    assert "<script>alert(1)" not in nothing
+    assert "No tickets match" in nothing
+
+
+def test_past_due_tab_lists_only_late_open_tickets(portal, app):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Broken dock")
+    new_ticket(portal, type="hardware", title="Sticky keyboard")
+    assert "Nothing is past due." in portal.get("/tickets?show=overdue").text
+    with app.state.session_factory() as session:
+        late = session.scalar(select(Ticket).where(Ticket.title == "Broken dock"))
+        late.due_at = utcnow() - timedelta(hours=3)
+        session.commit()
+    page = portal.get("/tickets?show=overdue").text
+    assert "Broken dock" in page and "Sticky keyboard" not in page
+    assert "late by 3h 0m" in page
+    # An unknown tab falls back to the open list instead of failing.
+    assert portal.get("/tickets?show=nonsense").status_code == 200

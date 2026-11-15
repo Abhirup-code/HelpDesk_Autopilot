@@ -96,6 +96,8 @@ Open the setup link the seed command printed for a user, choose a password, then
 | Manager | Everything above, plus approvals for their team and new hire / offboarding requests |
 | IT agent | The whole queue, status changes, second approval for admin rights, the audit log, and a link to the Grafana dashboard |
 
+The ticket list has a search box and three tabs: Open, Past due and All.
+
 Portal security: directory sign-in, signed session cookies, a CSRF token on every form, a lockout after 5 wrong passwords (logged as `signin.locked`), sign-in redirects that can't leave the site, and a strict Content-Security-Policy with no inline scripts.
 
 The same rules back the API and the portal (`app/services.py`), so the two can't drift apart.
@@ -196,7 +198,7 @@ Then open http://127.0.0.1:8000. The saved pages can't reach a server: scripts, 
 |---|---|---|
 | `password_reset` | Anyone | A one-time link (15 minutes, works once) goes to your inbox. Ticket auto-resolves |
 | `new_hire` | Manager or IT | Directory account created with the department's groups. The manager gets the username and a 72-hour set-password link |
-| `offboarding` | Manager or IT | After the last day ends: all groups removed, password removed, account moved to `ou=Disabled` |
+| `offboarding` | Manager (own team only) or IT | After the last day ends: all groups removed, password removed, account moved to `ou=Disabled` |
 | `access_request` | Anyone | Goes to your manager. `it-admins` also needs an IT agent. Approved groups are added automatically |
 | `hardware` | Anyone | Goes to the IT queue |
 
@@ -255,13 +257,17 @@ Requestable groups: erp-users, finance-share, git-users, helpdesk-agents, it-adm
 
 While a request waits for the manager, the SLA clock is paused, because IT can't act yet.
 
+Every open ticket shows the time left on its SLA ("2h 5m left", "late by 40m", "paused, 1d 3h left"), and the API returns it as `sla_seconds_left`.
+
 ## Security choices
 
 - The app signs in to the directory with a service account that can only manage `ou=Users`, `ou=Groups` and `ou=Disabled`. It cannot change anything else.
 - Passwords are set with the LDAP password modify operation, so the directory hashes them with Argon2id. The app never stores passwords.
 - API tokens and password links are random 256-bit values, stored only as SHA-256 hashes.
+- Asking for a new password link cancels any older unused link for that account, so only the newest one works.
 - Password links give one generic error for wrong, used or expired links, so they can't be probed.
 - LDAP search filters and names are escaped against injection.
+- Managers can offboard only people who report to them, or accounts their own new hire requests created. IT can offboard anyone.
 - Separation of duties: nobody can approve their own access request, and admin rights always need both a manager and an IT agent.
 - The audit log is append-only. The API has no way to change it, and database triggers refuse any UPDATE or DELETE on it.
 - Blocked attempts are logged too: trying to approve your own request leaves an `approval.denied` record.
@@ -293,17 +299,19 @@ Run the end-to-end test on your own machine with `scripts/e2e.sh`.
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/health` | Anyone | Health check |
+| GET | `/health` | Anyone | Is the process up? |
+| GET | `/ready` | Anyone | Can it do real work? Checks the database and the directory; 503 if either is down |
 | POST | `/api/tickets` | Signed in | Create a ticket. Automations run right away |
-| GET | `/api/tickets` | Signed in | Employees see their own tickets, IT agents see all. Filter with `status`, `type`, `priority` |
+| GET | `/api/tickets` | Signed in | Employees see their own tickets, IT agents see all. Filter with `status`, `type`, `priority`, `q` (words in the title or description) and `overdue=true`. Pages with `limit` (default 100) and `offset`; the `X-Total-Count` header has the full count |
 | GET | `/api/tickets/{id}` | Owner or agent | One ticket. Other people's tickets return 404 |
-| PATCH | `/api/tickets/{id}/status` | Agent | Change status. Resolving records the time |
+| PATCH | `/api/tickets/{id}/status` | Agent | Set status to `new`, `in_progress` or `resolved`. The change goes in the audit log, and resolving records the time |
 | GET | `/api/inbox` | Signed in | Your messages (stands in for email in the demo) |
 | POST | `/api/password-resets/{token}` | Link holder | Set a new password (12+ characters, not containing your username) |
 | POST | `/api/automation/run-due` | Agent | Run due offboardings now instead of waiting for the worker |
 | GET | `/api/approvals` | Manager or agent | Requests waiting for your decision |
 | POST | `/api/approvals/{id}` | Approver | Approve, or reject with a reason |
 | GET | `/api/audit` | Agent | Audit log, newest first. Filter with `target`, `action`, `ticket_id`, `limit` |
+| GET | `/api/audit.csv` | Agent | The same log as a CSV file for auditors, with the same filters. Cells that could run as spreadsheet formulas are neutralized |
 
 ## Run the tests
 

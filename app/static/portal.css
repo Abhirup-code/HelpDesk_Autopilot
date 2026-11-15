@@ -73,6 +73,7 @@ td.num { font-variant-numeric: tabular-nums; color: var(--muted); }
 .prio { font-weight: 700; font-size: 12px; font-variant-numeric: tabular-nums; }
 .prio-P1 { color: var(--danger); } .prio-P2 { color: var(--warn); }
 .late { color: var(--danger); font-weight: 700; font-size: 12px; }
+.left { color: var(--muted); font-size: 12px; white-space: nowrap; }
 
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; margin: 12px 0; }
 .facts dt { color: var(--muted); }
@@ -82,3 +83,6 @@ td.num { font-variant-numeric: tabular-nums; color: var(--muted); }
 .message .body { white-space: pre-line; overflow-wrap: anywhere; }
 code { font-size: 13px; background: color-mix(in srgb, var(--muted) 12%, transparent); padding: 1px 6px; border-radius: 4px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.download { padding: 9px 0; font-weight: 600; }
+.search { margin: 12px 0 4px; align-items: center; }
+.search input[type=search] { flex: 1 1 220px; max-width: 360px; }

@@ -28,6 +28,7 @@ from app import services
 from app.directory import Directory
 from app.models import AuditEvent, Role, Status, TicketType, User, aware, utcnow
 from app.policy import DEPARTMENTS, MIN_PASSWORD_LENGTH, REQUESTABLE_GROUPS
+from app.routes.approvals import csv_download
 from app.schemas import TicketCreate
 
 HERE = os.path.dirname(__file__)
@@ -69,7 +70,30 @@ def when(dt) -> str:
     return aware(dt).strftime("%b %d, %H:%M UTC") if dt else ""
 
 
-templates.env.filters.update(linkify=linkify, when=when)
+def span(seconds: int) -> str:
+    """A length of time in the two biggest units that matter: 3d 4h, 2h 5m, 12m."""
+    minutes = abs(seconds) // 60
+    days, hours, minutes = minutes // 1440, minutes % 1440 // 60, minutes % 60
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m" if minutes else "under 1m"
+
+
+def time_left(ticket) -> str:
+    """What the SLA clock says, in words: "2h 5m left", "late by 40m", "paused, 1d 3h left"."""
+    seconds = ticket.seconds_left()
+    if seconds is None:
+        return ""
+    if seconds < 0:
+        return f"late by {span(seconds)}"
+    return (
+        f"paused, {span(seconds)} left" if ticket.paused_at is not None else f"{span(seconds)} left"
+    )
+
+
+templates.env.filters.update(linkify=linkify, when=when, time_left=time_left)
 templates.env.globals.update(TYPE_LABELS=TYPE_LABELS, STATUS_LABELS=STATUS_LABELS)
 
 
@@ -254,16 +278,21 @@ def install_portal(
 
     @router.get("/tickets")
     def tickets_page(
-        request: Request, show: str = "open", session: Session = Depends(get_session)
+        request: Request,
+        show: str = "open",
+        q: str = "",
+        session: Session = Depends(get_session),
     ) -> Response:
         try:
             user = signed_in(request, session)
         except HTTPException as exc:
             return error_page(request, None, exc)
-        tickets = services.list_tickets(session, user)
+        show = show if show in ("open", "overdue", "all") else "open"
+        q = q.strip()[:100]
+        tickets = services.list_tickets(session, user, search=q, overdue=show == "overdue")
         if show == "open":
             tickets = [t for t in tickets if t.status not in services_closed()]
-        return render(request, "tickets.html", user=user, tickets=tickets, show=show)
+        return render(request, "tickets.html", user=user, tickets=tickets, show=show, q=q)
 
     @router.get("/tickets/new")
     def new_ticket_page(request: Request, session: Session = Depends(get_session)) -> Response:
@@ -330,7 +359,7 @@ def install_portal(
             ticket=ticket,
             history=history,
             breached=ticket.is_breached(),
-            statuses=[s.value for s in Status],
+            statuses=[s.value for s in Status if s in services.MANUAL_STATUSES],
         )
 
     @router.post("/tickets/{ticket_id}/status")
@@ -415,6 +444,21 @@ def install_portal(
         except HTTPException as exc:
             return error_page(request, user, exc)
         return render(request, "audit.html", user=user, events=events, action=action, target=target)
+
+    @router.get("/audit.csv")
+    def audit_download(
+        request: Request,
+        action: str | None = None,
+        target: str | None = None,
+        session: Session = Depends(get_session),
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+            events = services.audit_log(session, user, target or None, action or None, None, 10000)
+        except HTTPException as exc:
+            return error_page(request, user, exc)
+        return csv_download(services.audit_csv(events))
 
     @router.get("/reset/{token}")
     def reset_page(

@@ -1,8 +1,8 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.models import Priority, Ticket, TicketType
+from app.models import Priority, Status, Ticket, TicketType
 from app.sla import add_business_days, default_priority, due_at
 
 MON_10AM = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
@@ -93,3 +93,20 @@ def test_other_tickets_start_when_created():
     assert Ticket(type=TicketType.HARDWARE, created_at=MON_10AM, details={}).work_start() == (
         MON_10AM
     )
+
+
+def test_seconds_left_counts_down_and_goes_negative_when_late():
+    ticket = Ticket(due_at=MON_10AM, status=Status.NEW)
+    assert ticket.seconds_left(now=MON_10AM - timedelta(hours=2)) == 7200
+    assert ticket.seconds_left(now=MON_10AM + timedelta(minutes=30)) == -1800
+
+
+def test_seconds_left_stands_still_while_the_clock_is_paused():
+    paused = Ticket(
+        due_at=MON_10AM, status=Status.WAITING_APPROVAL, paused_at=MON_10AM - timedelta(hours=3)
+    )
+    assert paused.seconds_left(now=FRI_4PM) == 3 * 3600
+
+
+def test_closed_tickets_have_no_time_left():
+    assert Ticket(due_at=MON_10AM, status=Status.RESOLVED).seconds_left(now=FRI_4PM) is None

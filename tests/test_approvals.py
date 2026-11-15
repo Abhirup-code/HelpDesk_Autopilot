@@ -1,9 +1,13 @@
+import csv
+import io
+import re
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 
+from app import services
 from app.auth import hash_token
 from app.models import AuditEvent, Role, Ticket, User
 from tests.conftest import auth
@@ -318,3 +322,47 @@ def test_audit_log_is_newest_first_by_time(client, app):
         session.commit()
     events = client.get("/api/audit", headers=auth("ava")).json()
     assert [e["action"] for e in events] == ["newest", "middle", "oldest"]
+
+
+# -- audit log as a file ---------------------------------------------------------------
+
+
+def test_audit_log_downloads_as_csv(client):
+    ticket_id = request_access(client, "emma", "tableau-users").json()["id"]
+    decide(client, "liam", ticket_id, "approve")
+    response = client.get("/api/audit.csv", headers=auth("ava"))
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/csv; charset=utf-8"
+    assert response.headers["content-disposition"] == 'attachment; filename="audit-log.csv"'
+    rows = list(csv.reader(io.StringIO(response.text)))
+    assert rows[0] == ["when_utc", "who", "action", "user", "ticket", "detail"]
+    assert len(rows) == 1 + len(client.get("/api/audit", headers=auth("ava")).json())
+    assert all(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", row[0]) for row in rows[1:])
+    filtered = client.get("/api/audit.csv?action=nothing-like-this", headers=auth("ava"))
+    assert filtered.text == "when_utc,who,action,user,ticket,detail\n"
+
+
+def test_audit_csv_is_for_agents_only(client):
+    assert client.get("/api/audit.csv", headers=auth("emma")).status_code == 403
+    assert client.get("/api/audit.csv").status_code == 401
+
+
+def test_audit_csv_cannot_smuggle_a_spreadsheet_formula(client, app):
+    # Sign-in lockouts record whatever was typed as the username, so audit text
+    # can start with anything an outsider chooses.
+    formula = '=HYPERLINK("https://evil.example","Click")'
+    with app.state.session_factory() as session:
+        session.add(AuditEvent(actor=formula, action="signin.locked", target=formula, detail="-1"))
+        session.commit()
+    body = client.get("/api/audit.csv?action=signin.locked", headers=auth("ava")).text
+    row = list(csv.reader(io.StringIO(body)))[1]
+    assert row[1] == row[3] == "'" + formula
+    assert row[5] == "'-1"
+    assert [services.csv_cell(v) for v in ("+1", "@x", "\tx", "plain", None, 7)] == [
+        "'+1",
+        "'@x",
+        "'\tx",
+        "plain",
+        "",
+        "7",
+    ]

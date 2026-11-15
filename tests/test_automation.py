@@ -86,6 +86,26 @@ def test_redeem_link_sets_password_once(client, app, directory):
     assert again.status_code == 400
 
 
+def test_a_new_link_cancels_the_older_ones(client, app, directory):
+    post(client, "emma", type="password_reset")
+    post(client, "emma", type="password_reset")
+    newest, oldest = (link_token(m["body"]) for m in inbox(client, "emma")[:2])
+    body = {"new_password": "correct-horse-battery"}
+    old = client.post(f"/api/password-resets/{oldest}", json=body)
+    assert old.status_code == 400
+    assert not directory.authenticate("emma", "correct-horse-battery")
+    assert client.post(f"/api/password-resets/{newest}", json=body).status_code == 204
+    assert ("password_link.revoke", "emma", "1 older link(s) replaced by a new one") in audit(app)
+
+
+def test_a_new_link_leaves_other_peoples_links_alone(client):
+    post(client, "liam", type="password_reset")
+    post(client, "emma", type="password_reset")
+    token = link_token(inbox(client, "liam")[0]["body"])
+    body = {"new_password": "correct-horse-battery"}
+    assert client.post(f"/api/password-resets/{token}", json=body).status_code == 204
+
+
 def test_expired_link_is_rejected(client, app):
     post(client, "emma", type="password_reset")
     token = link_token(inbox(client, "emma")[0]["body"])
@@ -289,6 +309,38 @@ def test_offboarding_twice_goes_to_it(client, directory):
 
 def test_employee_cannot_offboard_people(client):
     assert post(client, "emma", **offboarding(username="liam")).status_code == 403
+
+
+def test_manager_cannot_offboard_someone_outside_their_team(client, directory):
+    # Ava works in IT and does not report to Liam.
+    response = post(client, "liam", **offboarding(username="ava"))
+    assert response.status_code == 403
+    assert "your own team" in response.json()["detail"]
+    assert not directory.is_disabled("ava")
+
+
+def test_manager_can_offboard_their_own_new_hire(client, directory):
+    hire = post(
+        client,
+        "liam",
+        type="new_hire",
+        details={
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "department": "Finance",
+            "start_date": str(TODAY),
+        },
+    ).json()
+    username = hire["details"]["username"]
+    # Jane has no portal account yet, but Liam's own request created her.
+    body = post(client, "liam", **offboarding(username=username)).json()
+    assert body["status"] == "auto_resolved"
+    assert directory.is_disabled(username)
+
+
+def test_it_can_offboard_anyone(client, directory):
+    assert post(client, "ava", **offboarding(username="liam")).json()["status"] == "auto_resolved"
+    assert directory.is_disabled("liam")
 
 
 def test_only_agents_can_run_automations(client):

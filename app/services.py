@@ -4,8 +4,11 @@ Each function checks permissions and raises HTTPException with the same status
 codes in both places, so the rules can't drift apart between the two front ends.
 """
 
+import csv
+import io
+
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app import sla
@@ -13,6 +16,7 @@ from app.auth import hash_token
 from app.automation import AccessFlow, Automator, today_utc
 from app.directory import Directory, DirectoryError
 from app.models import (
+    CLOSED_STATUSES,
     AuditEvent,
     InboxMessage,
     ResetToken,
@@ -28,6 +32,8 @@ from app.schemas import TicketCreate
 
 INVALID_LINK = "This link is invalid, expired or already used"
 NO_PENDING = "No pending approval for you on this ticket"
+# The statuses an IT agent may set by hand. The rest are set by approvals and automations.
+MANUAL_STATUSES = {Status.NEW, Status.IN_PROGRESS, Status.RESOLVED}
 # Only managers and IT can request account changes for other people.
 PEOPLE_CHANGES = {TicketType.NEW_HIRE, TicketType.OFFBOARDING}
 
@@ -40,14 +46,16 @@ def visible_ticket(session: Session, user: User, ticket_id: int) -> Ticket:
     return ticket
 
 
-def list_tickets(
-    session: Session,
+def ticket_query(
     user: User,
     status_filter: Status | None = None,
     type_filter: TicketType | None = None,
     priority=None,
-) -> list[Ticket]:
-    query = select(Ticket).order_by(Ticket.due_at)
+    search: str | None = None,
+    overdue: bool = False,
+):
+    """The tickets this person may see, narrowed by the filters."""
+    query = select(Ticket)
     if user.role != Role.AGENT:
         query = query.where(Ticket.requester_id == user.id)
     if status_filter:
@@ -56,7 +64,64 @@ def list_tickets(
         query = query.where(Ticket.type == type_filter)
     if priority:
         query = query.where(Ticket.priority == priority)
+    if search and search.strip():
+        # Matches part of the title or description and ignores capitals. Escaped, so
+        # "100%" looks for those characters and not for "100" followed by anything.
+        words = search.strip()
+        query = query.where(
+            or_(
+                Ticket.title.icontains(words, autoescape=True),
+                Ticket.description.icontains(words, autoescape=True),
+            )
+        )
+    if overdue:
+        # Still open and past due. A paused ticket is judged at the moment it was paused,
+        # the same rule Ticket.is_breached uses.
+        query = query.where(
+            Ticket.status.not_in(CLOSED_STATUSES),
+            or_(
+                and_(Ticket.paused_at.is_(None), Ticket.due_at < utcnow()),
+                and_(Ticket.paused_at.is_not(None), Ticket.paused_at > Ticket.due_at),
+            ),
+        )
+    return query
+
+
+def list_tickets(
+    session: Session,
+    user: User,
+    status_filter: Status | None = None,
+    type_filter: TicketType | None = None,
+    priority=None,
+    search: str | None = None,
+    overdue: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[Ticket]:
+    query = ticket_query(user, status_filter, type_filter, priority, search, overdue)
+    # The id breaks ties, so pages never repeat or skip a ticket with the same due time.
+    query = query.order_by(Ticket.due_at, Ticket.id).offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
     return list(session.scalars(query))
+
+
+def count_tickets(session: Session, user: User, *filters, **named) -> int:
+    """How many tickets match, across all pages. Takes the same filters as list_tickets."""
+    matching = ticket_query(user, *filters, **named).subquery()
+    return session.scalar(select(func.count()).select_from(matching)) or 0
+
+
+def on_team(session: Session, manager: User, username: str) -> bool:
+    """True if the account belongs to someone who reports to this manager, or was
+    created by one of the manager's own new hire requests."""
+    person = session.scalar(select(User).where(User.username == username))
+    if person is not None:
+        return person.manager_id == manager.id
+    hires = session.scalars(
+        select(Ticket).where(Ticket.type == TicketType.NEW_HIRE, Ticket.requester_id == manager.id)
+    )
+    return any((t.details or {}).get("username") == username for t in hires)
 
 
 def create_ticket(
@@ -64,11 +129,18 @@ def create_ticket(
 ) -> Ticket:
     if body.type in PEOPLE_CHANGES and user.role == Role.EMPLOYEE:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only managers and IT can request this")
-    if body.type == TicketType.OFFBOARDING and not directory.user_exists(body.details["username"]):
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            f"No directory account named {body.details['username']}",
-        )
+    if body.type == TicketType.OFFBOARDING:
+        username = body.details["username"]
+        if not directory.user_exists(username):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, f"No directory account named {username}"
+            )
+        if user.role == Role.MANAGER and not on_team(session, user, username):
+            # Without this, any manager could switch off any account in the company.
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "You can only offboard people on your own team. Ask IT for anyone else.",
+            )
     now = utcnow()
     priority = body.priority or sla.default_priority(body.type)
     ticket = Ticket(
@@ -92,7 +164,27 @@ def change_status(session: Session, user: User, ticket_id: int, new_status: Stat
     if user.role != Role.AGENT:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "IT agents only")
     ticket = visible_ticket(session, user, ticket_id)
+    if new_status not in MANUAL_STATUSES:
+        # The other statuses mean something happened: an approval, a rejection with a
+        # reason, or an automation. Setting them by hand would make the record lie.
+        allowed = ", ".join(s.value for s in Status if s in MANUAL_STATUSES)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Status can only be set by hand to: {allowed}",
+        )
+    old_status = ticket.status
+    if new_status == old_status:
+        return ticket
     ticket.set_status(new_status)
+    session.add(
+        AuditEvent(
+            actor=user.username,
+            action="ticket.status",
+            target=ticket.requester.username,
+            ticket_id=ticket.id,
+            detail=f"{old_status.value} -> {new_status.value}",
+        )
+    )
     session.commit()
     return ticket
 
@@ -211,3 +303,26 @@ def audit_log(
     if ticket_id is not None:
         query = query.where(AuditEvent.ticket_id == ticket_id)
     return list(session.scalars(query))
+
+
+AUDIT_CSV_COLUMNS = ["when_utc", "who", "action", "user", "ticket", "detail"]
+# A cell that starts with one of these runs as a formula when the file is opened in
+# Excel or Google Sheets. Audit text comes from people (ticket reasons, usernames).
+FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_cell(value: object) -> str:
+    text = "" if value is None else str(value)
+    return f"'{text}" if text.startswith(FORMULA_STARTS) else text
+
+
+def audit_csv(events: list[AuditEvent]) -> str:
+    """The audit log as CSV for auditors: one row per entry, newest first."""
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(AUDIT_CSV_COLUMNS)
+    for e in events:
+        when = aware(e.at).strftime("%Y-%m-%dT%H:%M:%SZ")
+        row = [when, e.actor, e.action, e.target, e.ticket_id, e.detail]
+        writer.writerow([csv_cell(value) for value in row])
+    return out.getvalue()

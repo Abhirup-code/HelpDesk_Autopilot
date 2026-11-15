@@ -1,6 +1,6 @@
 """Ticket endpoints."""
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app import services
@@ -26,6 +26,7 @@ def serialize(ticket: Ticket) -> TicketOut:
         due_at=ticket.due_at,
         resolved_at=ticket.resolved_at,
         sla_breached=ticket.is_breached(),
+        sla_seconds_left=ticket.seconds_left(),
         details=ticket.details or {},
         automation_error=ticket.automation_error,
     )
@@ -52,10 +53,21 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         status_filter: Status | None = Query(None, alias="status"),
         type_filter: TicketType | None = Query(None, alias="type"),
         priority: Priority | None = None,
+        q: str | None = Query(
+            None, max_length=100, description="Words in the title or description"
+        ),
+        overdue: bool = Query(False, description="Only open tickets that are past due"),
+        limit: int = Query(100, ge=1, le=500, description="Page size"),
+        offset: int = Query(0, ge=0, description="How many tickets to skip"),
+        *,
+        response: Response,
         user: User = Depends(current_user),
         session: Session = Depends(get_session),
     ) -> list[TicketOut]:
-        tickets = services.list_tickets(session, user, status_filter, type_filter, priority)
+        """Most urgent first. Returns one page; the X-Total-Count header has the full count."""
+        filters = (status_filter, type_filter, priority, q, overdue)
+        tickets = services.list_tickets(session, user, *filters, limit=limit, offset=offset)
+        response.headers["X-Total-Count"] = str(services.count_tickets(session, user, *filters))
         return [serialize(t) for t in tickets]
 
     @router.get("/{ticket_id}", response_model=TicketOut, responses={**NOT_FOUND})
