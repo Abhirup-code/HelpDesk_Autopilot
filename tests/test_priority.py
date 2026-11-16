@@ -2,7 +2,8 @@
 
 from datetime import datetime, timedelta
 
-from app.models import Ticket, aware
+from app import sla
+from app.models import Priority, Ticket, TicketType, aware
 from tests.conftest import TOKENS
 
 
@@ -72,8 +73,10 @@ def test_time_banked_while_the_ticket_waited_survives_the_change(client, app):
     after = due(set_priority(client, ticket["id"], "P1").json())
 
     created = aware(datetime.fromisoformat(ticket["created_at"]))
-    assert after - before == timedelta(hours=1) - timedelta(days=1)  # P1 target minus P3 target
-    assert after == created + timedelta(hours=1) + timedelta(hours=3)  # the 3 hours are still there
+    was = sla.ticket_due_at(TicketType.HARDWARE, Priority.P3, created, {})
+    now_due = sla.ticket_due_at(TicketType.HARDWARE, Priority.P1, created, {})
+    assert after - before == now_due - was  # moved by the difference between the targets
+    assert after == now_due + timedelta(hours=3)  # and the banked three hours are still there
 
 
 def test_only_an_agent_can_change_priority(client):

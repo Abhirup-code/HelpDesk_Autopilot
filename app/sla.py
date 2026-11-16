@@ -1,8 +1,69 @@
 """SLA rules from docs/sla-policy.md."""
 
-from datetime import datetime, timedelta
+import os
+from datetime import date, datetime, time, timedelta
 
 from app.models import Priority, TicketType
+
+# The working day a business-day target is counted in. P1 and P2 ignore all of this:
+# something urgent is urgent at two in the morning.
+WORK_START = time(9, 0)
+WORK_END = time(17, 0)
+
+# Days the help desk is closed, on top of weekends. Set HELPDESK_HOLIDAYS to a
+# comma-separated list of YYYY-MM-DD dates to match your own calendar.
+DEFAULT_HOLIDAYS = (
+    "2026-01-01",  # New Year's Day
+    "2026-05-25",  # Memorial Day
+    "2026-07-03",  # Independence Day, observed
+    "2026-09-07",  # Labor Day
+    "2026-11-26",  # Thanksgiving
+    "2026-11-27",  # day after Thanksgiving
+    "2026-12-25",  # Christmas Day
+)
+
+
+def holidays() -> frozenset[date]:
+    """The closed days, from the environment when it says so."""
+    raw = os.environ.get("HELPDESK_HOLIDAYS")
+    values = [v.strip() for v in raw.split(",")] if raw else list(DEFAULT_HOLIDAYS)
+    days = set()
+    for value in values:
+        try:
+            days.add(date.fromisoformat(value))
+        except ValueError:
+            # A typo in one date should not take the SLA clock down with it.
+            continue
+    return frozenset(days)
+
+
+def is_working_day(day: date) -> bool:
+    return day.weekday() < 5 and day not in holidays()
+
+
+def next_working_moment(moment: datetime) -> datetime:
+    """The first time the help desk is open at or after this moment.
+
+    A ticket filed at eleven at night is not ignored for ten hours and then due at
+    eleven the next night: its day starts when the desk opens.
+    """
+    current = moment
+    for _ in range(400):  # a year of closed days is more than enough
+        if not is_working_day(current.date()):
+            current = datetime.combine(
+                current.date() + timedelta(days=1), WORK_START, tzinfo=current.tzinfo
+            )
+            continue
+        if current.timetz().replace(tzinfo=None) < WORK_START:
+            return datetime.combine(current.date(), WORK_START, tzinfo=current.tzinfo)
+        if current.timetz().replace(tzinfo=None) >= WORK_END:
+            current = datetime.combine(
+                current.date() + timedelta(days=1), WORK_START, tzinfo=current.tzinfo
+            )
+            continue
+        return current
+    return current
+
 
 DEFAULT_PRIORITY: dict[TicketType, Priority] = {
     TicketType.PASSWORD_RESET: Priority.P2,
@@ -22,23 +83,23 @@ def default_priority(ticket_type: TicketType) -> Priority:
 
 
 def add_business_days(start: datetime, days: int) -> datetime:
-    """Move forward `days` weekdays, keeping the time of day.
+    """Move forward `days` open days, keeping the time of day.
 
-    A ticket opened on a weekend counts from the next Monday.
+    A ticket filed when the desk is shut counts from the next time it opens, so a
+    weekend, an evening and a public holiday all behave the same way.
     """
-    current = start
-    while current.weekday() >= 5:
-        current = (current + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+    current = next_working_moment(start)
     added = 0
     while added < days:
         current += timedelta(days=1)
-        if current.weekday() < 5:
+        if is_working_day(current.date()):
             added += 1
     return current
 
 
 def due_at(priority: Priority, created_at: datetime) -> datetime:
     if priority in CLOCK_HOURS:
+        # Urgent is urgent at two in the morning: no business hours here.
         return created_at + timedelta(hours=CLOCK_HOURS[priority])
     return add_business_days(created_at, BUSINESS_DAYS[priority])
 
