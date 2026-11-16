@@ -3,7 +3,7 @@
 import enum
 from datetime import UTC, date, datetime, time, timedelta
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -141,6 +141,23 @@ class Ticket(Base):
             self.paused_at = now
         self.status = status
         self.resolved_at = now if status in CLOSED_STATUSES else None
+
+
+class TicketComment(Base):
+    """A reply on a ticket. Internal notes are for IT only and never shown to the requester."""
+
+    __tablename__ = "ticket_comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id"), index=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    body: Mapped[str] = mapped_column(Text)
+    internal: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
+
+    author: Mapped[User] = relationship()
 
 
 class AuditEvent(Base):

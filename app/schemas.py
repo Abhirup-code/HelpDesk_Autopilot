@@ -41,6 +41,30 @@ DETAIL_MODELS: dict[TicketType, type[BaseModel]] = {
 }
 
 
+class CommentCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=5000)
+    internal: bool = Field(
+        default=False, description="IT agents only: a note the requester never sees"
+    )
+
+    @field_validator("body")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
+class CommentOut(BaseModel):
+    id: int
+    ticket_id: int
+    author: str
+    body: str
+    internal: bool
+    created_at: datetime
+
+
 class TicketCreate(BaseModel):
     type: TicketType
     title: str = Field(min_length=3, max_length=200)

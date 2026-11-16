@@ -32,6 +32,31 @@
   {% endif %}
 </section>
 
+<section class="card">
+  <h2>Conversation{% if comments %} ({{ comments | length }}){% endif %}</h2>
+  {% if comments %}
+  <ol class="thread">
+    {% for c in comments %}
+    <li class="{{ 'note' if c.internal else 'reply' }}">
+      <p class="meta"><strong>{{ c.author.full_name }}</strong> <time>{{ c.created_at | when }}</time>{% if c.internal %} <span class="pill">Internal note</span>{% endif %}</p>
+      <p>{{ c.body }}</p>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="muted">Nothing here yet. Add the first reply.</p>
+  {% endif %}
+  <form method="post" action="/tickets/{{ ticket.id }}/comments">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="comment-body">Add a reply</label>
+    <textarea id="comment-body" name="body" rows="3" maxlength="5000" required placeholder="What should the requester know?"></textarea>
+    {% if user.role.value == "agent" %}
+    <label class="check"><input type="checkbox" name="internal"> Internal note, the requester never sees this</label>
+    {% endif %}
+    <button type="submit">Post</button>
+  </form>
+</section>
+
 {% if history %}
 <section class="card">
   <h2>History</h2>

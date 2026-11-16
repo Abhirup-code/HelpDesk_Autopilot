@@ -388,3 +388,42 @@ def test_past_due_tab_lists_only_late_open_tickets(portal, app):
     assert "late by 3h 0m" in page
     # An unknown tab falls back to the open list instead of failing.
     assert portal.get("/tickets?show=nonsense").status_code == 200
+
+
+def test_the_ticket_page_takes_a_reply(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Monitor flickers")
+    path = "/tickets/1"
+    submit(portal, f"{path}/comments", path, body="It started this morning.")
+    page = portal.get(path).text
+    assert "It started this morning." in page
+    assert "Emma Ruiz" in page
+
+
+def test_an_employee_is_not_offered_the_internal_note_box(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Monitor flickers")
+    assert 'name="internal"' not in portal.get("/tickets/1").text
+
+
+def test_an_agent_gets_the_internal_note_box_and_the_requester_does_not_see_the_note(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Monitor flickers")
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    assert 'name="internal"' in portal.get("/tickets/1").text
+    submit(portal, "/tickets/1/comments", "/tickets/1", body="Dock is faulty.", internal="on")
+    assert "Internal note" in portal.get("/tickets/1").text
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "emma")
+    page = portal.get("/tickets/1").text
+    assert "Dock is faulty." not in page
+    assert "Internal note" not in page
+
+
+def test_an_empty_conversation_says_so(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Monitor flickers")
+    assert "Nothing here yet" in portal.get("/tickets/1").text

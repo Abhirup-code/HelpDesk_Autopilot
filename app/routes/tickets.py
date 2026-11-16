@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from app import services
 from app.directory import Directory
-from app.models import Priority, Status, Ticket, TicketType, User
-from app.schemas import ErrorOut, StatusUpdate, TicketCreate, TicketOut
+from app.models import Priority, Status, Ticket, TicketComment, TicketType, User
+from app.schemas import CommentCreate, CommentOut, ErrorOut, StatusUpdate, TicketCreate, TicketOut
 
 UNAUTHORIZED = {401: {"model": ErrorOut, "description": "Missing or invalid token"}}
 FORBIDDEN = {403: {"model": ErrorOut, "description": "Your role cannot do this"}}
@@ -29,6 +29,17 @@ def serialize(ticket: Ticket) -> TicketOut:
         sla_seconds_left=ticket.seconds_left(),
         details=ticket.details or {},
         automation_error=ticket.automation_error,
+    )
+
+
+def serialize_comment(comment: TicketComment) -> CommentOut:
+    return CommentOut(
+        id=comment.id,
+        ticket_id=comment.ticket_id,
+        author=comment.author.username,
+        body=comment.body,
+        internal=comment.internal,
+        created_at=comment.created_at,
     )
 
 
@@ -90,5 +101,30 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         session: Session = Depends(get_session),
     ) -> TicketOut:
         return serialize(services.change_status(session, user, ticket_id, body.status))
+
+    @router.get("/{ticket_id}/comments", response_model=list[CommentOut], responses={**NOT_FOUND})
+    def list_comments(
+        ticket_id: int,
+        user: User = Depends(current_user),
+        session: Session = Depends(get_session),
+    ) -> list[CommentOut]:
+        """Oldest first. Internal notes are left out for anyone who is not an IT agent."""
+        comments = services.list_comments(session, user, ticket_id)
+        return [serialize_comment(c) for c in comments]
+
+    @router.post(
+        "/{ticket_id}/comments",
+        response_model=CommentOut,
+        status_code=status.HTTP_201_CREATED,
+        responses={**FORBIDDEN, **NOT_FOUND},
+    )
+    def add_comment(
+        ticket_id: int,
+        body: CommentCreate,
+        user: User = Depends(current_user),
+        session: Session = Depends(get_session),
+    ) -> CommentOut:
+        comment = services.add_comment(session, user, ticket_id, body.body, body.internal)
+        return serialize_comment(comment)
 
     return router

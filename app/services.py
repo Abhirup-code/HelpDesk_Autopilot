@@ -23,6 +23,7 @@ from app.models import (
     Role,
     Status,
     Ticket,
+    TicketComment,
     TicketType,
     User,
     aware,
@@ -187,6 +188,41 @@ def change_status(session: Session, user: User, ticket_id: int, new_status: Stat
     )
     session.commit()
     return ticket
+
+
+def list_comments(session: Session, user: User, ticket_id: int) -> list[TicketComment]:
+    """Comments on a ticket, oldest first. Requesters never see internal notes."""
+    visible_ticket(session, user, ticket_id)
+    query = select(TicketComment).where(TicketComment.ticket_id == ticket_id)
+    if user.role != Role.AGENT:
+        query = query.where(TicketComment.internal.is_(False))
+    return list(session.scalars(query.order_by(TicketComment.created_at, TicketComment.id)))
+
+
+def add_comment(
+    session: Session, user: User, ticket_id: int, body: str, internal: bool = False
+) -> TicketComment:
+    """Add a reply to a ticket. Only IT agents may write an internal note."""
+    ticket = visible_ticket(session, user, ticket_id)
+    if internal and user.role != Role.AGENT:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only IT agents can write internal notes")
+    text = body.strip()
+    if not text:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Comment must not be blank")
+    comment = TicketComment(ticket_id=ticket.id, author_id=user.id, body=text, internal=internal)
+    session.add(comment)
+    # A reply to someone else's ticket is worth an email, and the requester cannot see
+    # internal notes, so those raise nothing.
+    if not internal and ticket.requester_id != user.id:
+        session.add(
+            InboxMessage(
+                user_id=ticket.requester_id,
+                subject=f"Reply on your ticket #{ticket.id}: {ticket.title}",
+                body=f"{user.full_name} wrote:\n\n{text}",
+            )
+        )
+    session.commit()
+    return comment
 
 
 def can_decide(ticket: Ticket, user: User) -> bool:

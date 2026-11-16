@@ -78,6 +78,16 @@ td.num { font-variant-numeric: tabular-nums; color: var(--muted); }
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; margin: 12px 0; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; }
+/* Ticket conversation: replies the requester sees, and internal notes for IT only. */
+.thread { list-style: none; padding: 0; margin: 0 0 16px; display: grid; gap: 10px; }
+.thread li { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; }
+.thread li.note { border-style: dashed; background: color-mix(in srgb, var(--muted) 7%, transparent); }
+.thread .meta { margin: 0 0 4px; font-size: 13px; }
+.thread .meta time { color: var(--muted); margin-left: 6px; }
+.thread li p:last-child { margin: 0; white-space: pre-wrap; }
+.check { display: block; font-weight: 400; margin: 8px 0; }
+.check input { margin-right: 6px; }
+
 .timeline { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; font-size: 14px; }
 .timeline time, .message time { color: var(--muted); font-size: 13px; }
 .message .body { white-space: pre-line; overflow-wrap: anywhere; }

@@ -358,9 +358,29 @@ def install_portal(
             user=user,
             ticket=ticket,
             history=history,
+            comments=services.list_comments(session, user, ticket.id),
             breached=ticket.is_breached(),
             statuses=[s.value for s in Status if s in services.MANUAL_STATUSES],
         )
+
+    @router.post("/tickets/{ticket_id}/comments")
+    def ticket_comment(
+        request: Request,
+        ticket_id: int,
+        body: str = Form(...),
+        internal: str = Form(""),
+        csrf: str = Form(""),
+        session: Session = Depends(get_session),
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+            check_csrf(request, csrf)
+            services.add_comment(session, user, ticket_id, body, internal == "on")
+        except HTTPException as exc:
+            return error_page(request, user, exc)
+        flash(request, "Note added." if internal == "on" else "Reply posted.")
+        return go(f"/tickets/{ticket_id}")
 
     @router.post("/tickets/{ticket_id}/status")
     def ticket_status(
