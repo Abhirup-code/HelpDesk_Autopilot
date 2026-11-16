@@ -14,6 +14,7 @@
     <dt>Assigned to</dt><dd>{% if ticket.assignee %}{{ ticket.assignee.full_name }}{% else %}<span class="muted">Nobody yet</span>{% endif %}</dd>
     <dt>Created</dt><dd>{{ ticket.created_at | when }}</dd>
     <dt>Due</dt><dd>{{ ticket.due_at | when }}{% if ticket | time_left %} <span class="{{ 'late' if breached else 'left' }}">{{ ticket | time_left }}</span>{% elif breached %} <span class="late">Closed late</span>{% endif %}</dd>
+    {% if ticket.reopen_count %}<dt>Reopened</dt><dd>{{ ticket.reopen_count }} time{{ "s" if ticket.reopen_count > 1 }}</dd>{% endif %}
     <dt>First reply</dt><dd>{% if ticket.first_response_at %}{{ ticket.first_response_at | when }} <span class="muted">({{ ticket.first_response_seconds() | span }} after it arrived)</span>{% else %}<span class="muted">Waiting for a first reply</span>{% endif %}</dd>
     {% if ticket.resolved_at %}<dt>Closed</dt><dd>{{ ticket.resolved_at | when }}</dd>{% endif %}
     {% for key, value in (ticket.details or {}).items() if key != "demo" %}
@@ -22,6 +23,15 @@
   </dl>
   <p>{{ ticket.description }}</p>
   {% if ticket.automation_error %}<p class="error">Automation stopped: {{ ticket.automation_error }}. IT will take it from here.</p>{% endif %}
+
+  {% if can_reopen %}
+  <form method="post" action="/tickets/{{ ticket.id }}/reopen">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="reopen-reason">Still not fixed? Reopen it</label>
+    <input id="reopen-reason" name="reason" maxlength="500" required placeholder="What is still wrong?">
+    <button type="submit" class="secondary">Reopen</button>
+  </form>
+  {% endif %}
 
   {% if user.role.value == "agent" %}
   <form method="post" action="/tickets/{{ ticket.id }}/status" class="inline">

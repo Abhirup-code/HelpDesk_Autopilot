@@ -61,6 +61,11 @@ class TicketCollector(Collector):
             "Median time from a ticket arriving to its first reply, by type",
             labels=["type"],
         )
+        reopened = CounterMetricFamily(
+            "helpdesk_tickets_reopened",
+            "Times a ticket came back after being resolved, by type",
+            labels=["type"],
+        )
         answered_rate = GaugeMetricFamily(
             "helpdesk_tickets_answered_ratio",
             "Share of tickets that have had a reply",
@@ -73,9 +78,12 @@ class TicketCollector(Collector):
         closed_counts: dict[tuple[str, str], int] = {}
         durations: dict[str, list[float]] = {}
         responses: dict[str, list[float]] = {}
+        reopens: dict[str, int] = {}
         answered = 0
         on_time = resolved = auto = breached = 0
         for t in tickets:
+            if t.reopen_count:
+                reopens[t.type.value] = reopens.get(t.type.value, 0) + t.reopen_count
             replied = t.first_response_seconds()
             if replied is not None:
                 answered += 1
@@ -103,6 +111,8 @@ class TicketCollector(Collector):
             median_seconds.add_metric([ticket_type], median(values))
         for ticket_type, values in sorted(responses.items()):
             first_response.add_metric([ticket_type], median(values))
+        for ticket_type, count in sorted(reopens.items()):
+            reopened.add_metric([ticket_type], count)
         for action, count in sorted(audit_counts):
             audit.add_metric([action], count)
         breached_open.add_metric([], breached)
@@ -118,6 +128,7 @@ class TicketCollector(Collector):
             auto_rate,
             median_seconds,
             first_response,
+            reopened,
             answered_rate,
             audit,
         )

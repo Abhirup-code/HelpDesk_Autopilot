@@ -367,9 +367,28 @@ def install_portal(
             history=history,
             comments=services.list_comments(session, user, ticket.id),
             agents=services.agents(session) if user.role == Role.AGENT else [],
+            can_reopen=ticket.status in services.REOPENABLE,
             breached=ticket.is_breached(),
             statuses=[s.value for s in Status if s in services.MANUAL_STATUSES],
         )
+
+    @router.post("/tickets/{ticket_id}/reopen")
+    def ticket_reopen(
+        request: Request,
+        ticket_id: int,
+        reason: str = Form(""),
+        csrf: str = Form(""),
+        session: Session = Depends(get_session),
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+            check_csrf(request, csrf)
+            services.reopen_ticket(session, user, ticket_id, reason)
+        except HTTPException as exc:
+            return error_page(request, user, exc)
+        flash(request, "Ticket reopened.")
+        return go(f"/tickets/{ticket_id}")
 
     @router.post("/tickets/{ticket_id}/assignee")
     def ticket_assignee(

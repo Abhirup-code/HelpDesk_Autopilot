@@ -41,6 +41,18 @@ DETAIL_MODELS: dict[TicketType, type[BaseModel]] = {
 }
 
 
+class ReopenRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=500, description="What is still wrong")
+
+    @field_validator("reason")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
 class AssigneeUpdate(BaseModel):
     assignee: str | None = Field(
         default=None, description="An IT agent's username, or null to unassign"
@@ -122,6 +134,7 @@ class TicketOut(BaseModel):
     details: dict
     automation_error: str | None
     assignee: str | None = None
+    reopen_count: int = 0
     first_response_at: datetime | None = None
     first_response_seconds: int | None = Field(
         default=None, description="Seconds from the ticket arriving to the first reply"

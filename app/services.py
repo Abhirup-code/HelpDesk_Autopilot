@@ -6,6 +6,7 @@ codes in both places, so the rules can't drift apart between the two front ends.
 
 import csv
 import io
+from datetime import timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, func, or_, select
@@ -241,6 +242,67 @@ def add_comment(
 
 
 UNASSIGNED = "unassigned"
+# How long after a ticket closes it can still be reopened. After that the problem
+# is a new one, with its own SLA, rather than the old ticket dragged back to life.
+REOPEN_WINDOW = timedelta(days=7)
+# A rejected request was a decision, not a fix. Ask again with a new ticket.
+REOPENABLE = {Status.RESOLVED, Status.AUTO_RESOLVED}
+
+
+def reopen_ticket(session: Session, user: User, ticket_id: int, reason: str) -> Ticket:
+    """Put a closed ticket back in the queue because the fix did not hold."""
+    ticket = visible_ticket(session, user, ticket_id)
+    if ticket.status not in REOPENABLE:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Only a resolved ticket can be reopened. Raise a new request instead.",
+        )
+    closed_for = utcnow() - aware(ticket.resolved_at)
+    if closed_for > REOPEN_WINDOW:
+        days = REOPEN_WINDOW.days
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"This ticket closed more than {days} days ago. Raise a new request instead.",
+        )
+    text = reason.strip()
+    if not text:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Say what is still wrong when you reopen"
+        )
+    now = utcnow()
+    ticket.reopen_count += 1
+    ticket.set_status(Status.IN_PROGRESS, now)
+    # A fresh clock from now: the old due time is long past and judging the second
+    # attempt by the first one's deadline would mark it late before work restarts.
+    ticket.due_at = sla.due_at(ticket.priority, now)
+    session.add(
+        TicketComment(
+            ticket_id=ticket.id,
+            author_id=user.id,
+            body=f"Reopened: {text}",
+            internal=False,
+            created_at=now,
+        )
+    )
+    session.add(
+        AuditEvent(
+            actor=user.username,
+            action="ticket.reopen",
+            target=ticket.requester.username,
+            ticket_id=ticket.id,
+            detail=f"reopen #{ticket.reopen_count}: {text[:200]}",
+        )
+    )
+    if ticket.assignee is not None and ticket.assignee_id != user.id:
+        session.add(
+            InboxMessage(
+                user_id=ticket.assignee_id,
+                subject=f"Ticket #{ticket.id} is back: {ticket.title}",
+                body=f"{user.full_name} reopened this ticket.\n\n{text}",
+            )
+        )
+    session.commit()
+    return ticket
 
 
 def agents(session: Session) -> list[User]:

@@ -100,6 +100,10 @@ class Ticket(Base):
     # Set when an automation fails, so IT can see why the ticket came to them.
     automation_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # How many times the ticket came back after being resolved. A fix that does not
+    # hold is worse than a slow one, so this is counted rather than hidden.
+    reopen_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
     # Set while the SLA clock is paused (waiting for a manager).
     paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

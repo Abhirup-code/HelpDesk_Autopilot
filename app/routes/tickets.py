@@ -11,6 +11,7 @@ from app.schemas import (
     CommentCreate,
     CommentOut,
     ErrorOut,
+    ReopenRequest,
     StatusUpdate,
     TicketCreate,
     TicketOut,
@@ -38,6 +39,7 @@ def serialize(ticket: Ticket) -> TicketOut:
         details=ticket.details or {},
         automation_error=ticket.automation_error,
         assignee=ticket.assignee.username if ticket.assignee else None,
+        reopen_count=ticket.reopen_count,
         first_response_at=ticket.first_response_at,
         first_response_seconds=ticket.first_response_seconds(),
     )
@@ -115,6 +117,20 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         session: Session = Depends(get_session),
     ) -> TicketOut:
         return serialize(services.change_status(session, user, ticket_id, body.status))
+
+    @router.post(
+        "/{ticket_id}/reopen",
+        response_model=TicketOut,
+        responses={**NOT_FOUND},
+    )
+    def reopen(
+        ticket_id: int,
+        body: ReopenRequest,
+        user: User = Depends(current_user),
+        session: Session = Depends(get_session),
+    ) -> TicketOut:
+        """Put a resolved ticket back in the queue, with a fresh SLA clock."""
+        return serialize(services.reopen_ticket(session, user, ticket_id, body.reason))
 
     @router.patch(
         "/{ticket_id}/assignee",

@@ -475,3 +475,21 @@ def test_the_ticket_page_shows_when_the_first_reply_came(portal):
     page = portal.get("/tickets/1").text
     assert "Waiting for a first reply" not in page
     assert "after it arrived" in page
+
+
+def test_a_resolved_ticket_offers_a_reopen_box(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Printer jams")
+    assert "Still not fixed?" not in portal.get("/tickets/1").text
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    submit(portal, "/tickets/1/status", "/tickets/1", status="resolved")
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "emma")
+    assert "Still not fixed?" in portal.get("/tickets/1").text
+    submit(portal, "/tickets/1/reopen", "/tickets/1", reason="Jammed again.")
+    page = portal.get("/tickets/1").text
+    assert "Reopened: Jammed again." in page
+    assert "1 time" in page
