@@ -56,6 +56,15 @@ class TicketCollector(Collector):
             "Median time from creation to resolution, by type",
             labels=["type"],
         )
+        first_response = GaugeMetricFamily(
+            "helpdesk_first_response_seconds_median",
+            "Median time from a ticket arriving to its first reply, by type",
+            labels=["type"],
+        )
+        answered_rate = GaugeMetricFamily(
+            "helpdesk_tickets_answered_ratio",
+            "Share of tickets that have had a reply",
+        )
         audit = CounterMetricFamily(
             "helpdesk_audit_events", "Audit log entries, by action", labels=["action"]
         )
@@ -63,8 +72,14 @@ class TicketCollector(Collector):
         open_counts: dict[tuple[str, str], int] = {}
         closed_counts: dict[tuple[str, str], int] = {}
         durations: dict[str, list[float]] = {}
+        responses: dict[str, list[float]] = {}
+        answered = 0
         on_time = resolved = auto = breached = 0
         for t in tickets:
+            replied = t.first_response_seconds()
+            if replied is not None:
+                answered += 1
+                responses.setdefault(t.type.value, []).append(float(replied))
             if t.status in CLOSED_STATUSES:
                 key = (t.type.value, t.status.value)
                 closed_counts[key] = closed_counts.get(key, 0) + 1
@@ -86,11 +101,14 @@ class TicketCollector(Collector):
             closed.add_metric([ticket_type, outcome], count)
         for ticket_type, values in sorted(durations.items()):
             median_seconds.add_metric([ticket_type], median(values))
+        for ticket_type, values in sorted(responses.items()):
+            first_response.add_metric([ticket_type], median(values))
         for action, count in sorted(audit_counts):
             audit.add_metric([action], count)
         breached_open.add_metric([], breached)
         compliance.add_metric([], on_time / resolved if resolved else 1.0)
         auto_rate.add_metric([], auto / resolved if resolved else 0.0)
+        answered_rate.add_metric([], answered / len(tickets) if tickets else 0.0)
 
         yield from (
             open_tickets,
@@ -99,6 +117,8 @@ class TicketCollector(Collector):
             compliance,
             auto_rate,
             median_seconds,
+            first_response,
+            answered_rate,
             audit,
         )
 

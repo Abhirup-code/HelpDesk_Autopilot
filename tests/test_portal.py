@@ -462,3 +462,16 @@ def test_the_mine_tab_shows_only_tickets_you_own(portal):
     assert "Mine to fix" in mine and "Someone elses" not in mine
     waiting = portal.get("/tickets?show=unassigned").text
     assert "Someone elses" in waiting and "Mine to fix" not in waiting
+
+
+def test_the_ticket_page_shows_when_the_first_reply_came(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Docking station is dead")
+    assert "Waiting for a first reply" in portal.get("/tickets/1").text
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    submit(portal, "/tickets/1/comments", "/tickets/1", body="Looking at it now.")
+    page = portal.get("/tickets/1").text
+    assert "Waiting for a first reply" not in page
+    assert "after it arrived" in page

@@ -14,6 +14,7 @@
     <dt>Assigned to</dt><dd>{% if ticket.assignee %}{{ ticket.assignee.full_name }}{% else %}<span class="muted">Nobody yet</span>{% endif %}</dd>
     <dt>Created</dt><dd>{{ ticket.created_at | when }}</dd>
     <dt>Due</dt><dd>{{ ticket.due_at | when }}{% if ticket | time_left %} <span class="{{ 'late' if breached else 'left' }}">{{ ticket | time_left }}</span>{% elif breached %} <span class="late">Closed late</span>{% endif %}</dd>
+    <dt>First reply</dt><dd>{% if ticket.first_response_at %}{{ ticket.first_response_at | when }} <span class="muted">({{ ticket.first_response_seconds() | span }} after it arrived)</span>{% else %}<span class="muted">Waiting for a first reply</span>{% endif %}</dd>
     {% if ticket.resolved_at %}<dt>Closed</dt><dd>{{ ticket.resolved_at | when }}</dd>{% endif %}
     {% for key, value in (ticket.details or {}).items() if key != "demo" %}
     <dt>{{ key.replace('_', ' ') | capitalize }}</dt><dd>{{ value }}</dd>

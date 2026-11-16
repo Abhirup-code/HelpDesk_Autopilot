@@ -122,6 +122,10 @@ class TicketOut(BaseModel):
     details: dict
     automation_error: str | None
     assignee: str | None = None
+    first_response_at: datetime | None = None
+    first_response_seconds: int | None = Field(
+        default=None, description="Seconds from the ticket arriving to the first reply"
+    )
 
 
 class ApprovalDecision(BaseModel):

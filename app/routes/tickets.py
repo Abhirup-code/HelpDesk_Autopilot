@@ -38,6 +38,8 @@ def serialize(ticket: Ticket) -> TicketOut:
         details=ticket.details or {},
         automation_error=ticket.automation_error,
         assignee=ticket.assignee.username if ticket.assignee else None,
+        first_response_at=ticket.first_response_at,
+        first_response_seconds=ticket.first_response_seconds(),
     )
 
 

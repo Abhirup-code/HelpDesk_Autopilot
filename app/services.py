@@ -217,8 +217,15 @@ def add_comment(
     text = body.strip()
     if not text:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Comment must not be blank")
-    comment = TicketComment(ticket_id=ticket.id, author_id=user.id, body=text, internal=internal)
+    now = utcnow()
+    comment = TicketComment(
+        ticket_id=ticket.id, author_id=user.id, body=text, internal=internal, created_at=now
+    )
     session.add(comment)
+    # First reply from anyone but the requester. An internal note is not a reply:
+    # the person waiting has still heard nothing.
+    if not internal and ticket.requester_id != user.id and ticket.first_response_at is None:
+        ticket.first_response_at = now
     # A reply to someone else's ticket is worth an email, and the requester cannot see
     # internal notes, so those raise nothing.
     if not internal and ticket.requester_id != user.id:

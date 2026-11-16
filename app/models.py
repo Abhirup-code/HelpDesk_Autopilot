@@ -90,6 +90,11 @@ class Ticket(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When somebody other than the requester first replied. The number people on a
+    # help desk are judged by, alongside time to resolve.
+    first_response_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # Type-specific fields, e.g. new hire name and start date. See app/schemas.py.
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     # Set when an automation fails, so IT can see why the ticket came to them.
@@ -120,6 +125,12 @@ class Ticket(Base):
             return None
         at = aware(self.paused_at) if self.paused_at is not None else (now or utcnow())
         return int((aware(self.due_at) - at).total_seconds())
+
+    def first_response_seconds(self) -> int | None:
+        """Seconds from the ticket arriving to the first reply, or None if nobody has."""
+        if self.first_response_at is None:
+            return None
+        return max(int((aware(self.first_response_at) - aware(self.created_at)).total_seconds()), 0)
 
     def work_start(self) -> datetime:
         """When work on the ticket could begin.

@@ -93,7 +93,7 @@ def time_left(ticket) -> str:
     )
 
 
-templates.env.filters.update(linkify=linkify, when=when, time_left=time_left)
+templates.env.filters.update(linkify=linkify, when=when, time_left=time_left, span=span)
 templates.env.globals.update(TYPE_LABELS=TYPE_LABELS, STATUS_LABELS=STATUS_LABELS)
 
 
