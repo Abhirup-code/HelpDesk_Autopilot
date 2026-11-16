@@ -41,6 +41,12 @@ DETAIL_MODELS: dict[TicketType, type[BaseModel]] = {
 }
 
 
+class AssigneeUpdate(BaseModel):
+    assignee: str | None = Field(
+        default=None, description="An IT agent's username, or null to unassign"
+    )
+
+
 class CommentCreate(BaseModel):
     body: str = Field(min_length=1, max_length=5000)
     internal: bool = Field(
@@ -115,6 +121,7 @@ class TicketOut(BaseModel):
     )
     details: dict
     automation_error: str | None
+    assignee: str | None = None
 
 
 class ApprovalDecision(BaseModel):

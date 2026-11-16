@@ -427,3 +427,38 @@ def test_an_empty_conversation_says_so(portal):
     sign_in(portal, "emma")
     new_ticket(portal, type="hardware", title="Monitor flickers")
     assert "Nothing here yet" in portal.get("/tickets/1").text
+
+
+def test_an_agent_can_assign_a_ticket_from_the_page(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Monitor flickers")
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    assert "Nobody yet" in portal.get("/tickets/1").text
+    submit(portal, "/tickets/1/assignee", "/tickets/1", assignee="ava")
+    assert "Ava Patel" in portal.get("/tickets/1").text
+
+
+def test_the_queue_has_mine_and_unassigned_tabs_for_agents_only(portal):
+    sign_in(portal, "emma")
+    assert "show=mine" not in portal.get("/tickets").text
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    page = portal.get("/tickets").text
+    assert "show=mine" in page and "show=unassigned" in page
+
+
+def test_the_mine_tab_shows_only_tickets_you_own(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Mine to fix")
+    new_ticket(portal, type="hardware", title="Someone elses")
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    submit(portal, "/tickets/1/assignee", "/tickets/1", assignee="ava")
+    mine = portal.get("/tickets?show=mine").text
+    assert "Mine to fix" in mine and "Someone elses" not in mine
+    waiting = portal.get("/tickets?show=unassigned").text
+    assert "Someone elses" in waiting and "Mine to fix" not in waiting

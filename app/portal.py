@@ -287,10 +287,17 @@ def install_portal(
             user = signed_in(request, session)
         except HTTPException as exc:
             return error_page(request, None, exc)
-        show = show if show in ("open", "overdue", "all") else "open"
+        show = show if show in ("open", "overdue", "mine", "unassigned", "all") else "open"
         q = q.strip()[:100]
-        tickets = services.list_tickets(session, user, search=q, overdue=show == "overdue")
-        if show == "open":
+        assignee = None
+        if show == "mine" and user.role == Role.AGENT:
+            assignee = user.username
+        elif show == "unassigned":
+            assignee = services.UNASSIGNED
+        tickets = services.list_tickets(
+            session, user, search=q, overdue=show == "overdue", assignee=assignee
+        )
+        if show in ("open", "mine", "unassigned"):
             tickets = [t for t in tickets if t.status not in services_closed()]
         return render(request, "tickets.html", user=user, tickets=tickets, show=show, q=q)
 
@@ -359,9 +366,29 @@ def install_portal(
             ticket=ticket,
             history=history,
             comments=services.list_comments(session, user, ticket.id),
+            agents=services.agents(session) if user.role == Role.AGENT else [],
             breached=ticket.is_breached(),
             statuses=[s.value for s in Status if s in services.MANUAL_STATUSES],
         )
+
+    @router.post("/tickets/{ticket_id}/assignee")
+    def ticket_assignee(
+        request: Request,
+        ticket_id: int,
+        assignee: str = Form(""),
+        csrf: str = Form(""),
+        session: Session = Depends(get_session),
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+            check_csrf(request, csrf)
+            ticket = services.assign_ticket(session, user, ticket_id, assignee or None)
+        except HTTPException as exc:
+            return error_page(request, user, exc)
+        who = ticket.assignee.full_name if ticket.assignee else "nobody"
+        flash(request, f"Ticket assigned to {who}.")
+        return go(f"/tickets/{ticket.id}")
 
     @router.post("/tickets/{ticket_id}/comments")
     def ticket_comment(

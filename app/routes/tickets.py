@@ -6,7 +6,15 @@ from sqlalchemy.orm import Session
 from app import services
 from app.directory import Directory
 from app.models import Priority, Status, Ticket, TicketComment, TicketType, User
-from app.schemas import CommentCreate, CommentOut, ErrorOut, StatusUpdate, TicketCreate, TicketOut
+from app.schemas import (
+    AssigneeUpdate,
+    CommentCreate,
+    CommentOut,
+    ErrorOut,
+    StatusUpdate,
+    TicketCreate,
+    TicketOut,
+)
 
 UNAUTHORIZED = {401: {"model": ErrorOut, "description": "Missing or invalid token"}}
 FORBIDDEN = {403: {"model": ErrorOut, "description": "Your role cannot do this"}}
@@ -29,6 +37,7 @@ def serialize(ticket: Ticket) -> TicketOut:
         sla_seconds_left=ticket.seconds_left(),
         details=ticket.details or {},
         automation_error=ticket.automation_error,
+        assignee=ticket.assignee.username if ticket.assignee else None,
     )
 
 
@@ -68,6 +77,9 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
             None, max_length=100, description="Words in the title or description"
         ),
         overdue: bool = Query(False, description="Only open tickets that are past due"),
+        assignee: str | None = Query(
+            None, max_length=64, description="An agent's username, or 'unassigned'"
+        ),
         limit: int = Query(100, ge=1, le=500, description="Page size"),
         offset: int = Query(0, ge=0, description="How many tickets to skip"),
         *,
@@ -76,7 +88,7 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         session: Session = Depends(get_session),
     ) -> list[TicketOut]:
         """Most urgent first. Returns one page; the X-Total-Count header has the full count."""
-        filters = (status_filter, type_filter, priority, q, overdue)
+        filters = (status_filter, type_filter, priority, q, overdue, assignee)
         tickets = services.list_tickets(session, user, *filters, limit=limit, offset=offset)
         response.headers["X-Total-Count"] = str(services.count_tickets(session, user, *filters))
         return [serialize(t) for t in tickets]
@@ -101,6 +113,20 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         session: Session = Depends(get_session),
     ) -> TicketOut:
         return serialize(services.change_status(session, user, ticket_id, body.status))
+
+    @router.patch(
+        "/{ticket_id}/assignee",
+        response_model=TicketOut,
+        responses={**FORBIDDEN, **NOT_FOUND},
+    )
+    def update_assignee(
+        ticket_id: int,
+        body: AssigneeUpdate,
+        user: User = Depends(current_user),
+        session: Session = Depends(get_session),
+    ) -> TicketOut:
+        """Give the ticket to an IT agent, or send null to put it back in the queue."""
+        return serialize(services.assign_ticket(session, user, ticket_id, body.assignee))
 
     @router.get("/{ticket_id}/comments", response_model=list[CommentOut], responses={**NOT_FOUND})
     def list_comments(

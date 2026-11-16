@@ -11,6 +11,7 @@
     <dt>Type</dt><dd>{{ TYPE_LABELS[ticket.type.value] }}</dd>
     <dt>Priority</dt><dd><span class="prio prio-{{ ticket.priority.value }}">{{ ticket.priority.value }}</span></dd>
     <dt>Requested by</dt><dd>{{ ticket.requester.full_name }}</dd>
+    <dt>Assigned to</dt><dd>{% if ticket.assignee %}{{ ticket.assignee.full_name }}{% else %}<span class="muted">Nobody yet</span>{% endif %}</dd>
     <dt>Created</dt><dd>{{ ticket.created_at | when }}</dd>
     <dt>Due</dt><dd>{{ ticket.due_at | when }}{% if ticket | time_left %} <span class="{{ 'late' if breached else 'left' }}">{{ ticket | time_left }}</span>{% elif breached %} <span class="late">Closed late</span>{% endif %}</dd>
     {% if ticket.resolved_at %}<dt>Closed</dt><dd>{{ ticket.resolved_at | when }}</dd>{% endif %}
@@ -28,6 +29,16 @@
       <select name="status">{% for s in statuses %}<option value="{{ s }}" {% if s == ticket.status.value %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>{% endfor %}</select>
     </label>
     <button type="submit">Update</button>
+  </form>
+  <form method="post" action="/tickets/{{ ticket.id }}/assignee" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Assigned to
+      <select name="assignee">
+        <option value="">Nobody</option>
+        {% for a in agents %}<option value="{{ a.username }}" {% if ticket.assignee and a.id == ticket.assignee.id %}selected{% endif %}>{{ a.full_name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">Assign</button>
   </form>
   {% endif %}
 </section>

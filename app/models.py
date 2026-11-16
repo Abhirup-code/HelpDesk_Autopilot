@@ -83,6 +83,10 @@ class Ticket(Base):
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text)
     requester_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # The IT agent who owns the ticket. None means it is still in the unassigned queue.
+    assignee_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -94,7 +98,8 @@ class Ticket(Base):
     # Set while the SLA clock is paused (waiting for a manager).
     paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    requester: Mapped[User] = relationship()
+    requester: Mapped[User] = relationship(foreign_keys=[requester_id])
+    assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id])
 
     def is_breached(self, now: datetime | None = None) -> bool:
         """A ticket breaches its SLA if it was resolved late, or is still open past due."""

@@ -13,20 +13,23 @@
   {% if q %}<a href="/tickets?show={{ show }}">Clear</a>{% endif %}
 </form>
 <p class="tabs">
-  {% for key, label in [("open", "Open"), ("overdue", "Past due"), ("all", "All")] %}
+  {% set tabs = [("open", "Open"), ("overdue", "Past due")] %}
+  {% if user.role.value == "agent" %}{% set tabs = tabs + [("mine", "Mine"), ("unassigned", "Unassigned")] %}{% endif %}
+  {% for key, label in tabs + [("all", "All")] %}
   <a href="/tickets?show={{ key }}{% if q %}&amp;q={{ q | urlencode }}{% endif %}" {% if show == key %}aria-current="page"{% endif %}>{{ label }}</a>
   {% endfor %}
 </p>
 {% if tickets %}
 <div class="table-wrap">
 <table>
-  <thead><tr><th>#</th><th>Title</th><th>Type</th><th>Priority</th><th>Status</th><th>Due</th></tr></thead>
+  <thead><tr><th>#</th><th>Title</th><th>Type</th>{% if user.role.value == "agent" %}<th>Owner</th>{% endif %}<th>Priority</th><th>Status</th><th>Due</th></tr></thead>
   <tbody>
   {% for t in tickets %}
   <tr>
     <td class="num">{{ t.id }}</td>
     <td><a href="/tickets/{{ t.id }}">{{ t.title }}</a></td>
     <td>{{ TYPE_LABELS[t.type.value] }}</td>
+    {% if user.role.value == "agent" %}<td>{% if t.assignee %}{{ t.assignee.full_name }}{% else %}<span class="muted">Unassigned</span>{% endif %}</td>{% endif %}
     <td><span class="prio prio-{{ t.priority.value }}">{{ t.priority.value }}</span></td>
     <td><span class="pill s-{{ t.status.value }}">{{ STATUS_LABELS[t.status.value] }}</span></td>
     <td>{{ t.due_at | when }}{% if t | time_left %} <span class="{{ 'late' if t.is_breached() else 'left' }}">{{ t | time_left }}</span>{% elif t.is_breached() %} <span class="late">Closed late</span>{% endif %}</td>

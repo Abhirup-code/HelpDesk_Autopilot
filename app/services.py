@@ -54,6 +54,7 @@ def ticket_query(
     priority=None,
     search: str | None = None,
     overdue: bool = False,
+    assignee: str | None = None,
 ):
     """The tickets this person may see, narrowed by the filters."""
     query = select(Ticket)
@@ -74,6 +75,12 @@ def ticket_query(
                 Ticket.title.icontains(words, autoescape=True),
                 Ticket.description.icontains(words, autoescape=True),
             )
+        )
+    if assignee == UNASSIGNED:
+        query = query.where(Ticket.assignee_id.is_(None))
+    elif assignee:
+        query = query.where(
+            Ticket.assignee_id == select(User.id).where(User.username == assignee).scalar_subquery()
         )
     if overdue:
         # Still open and past due. A paused ticket is judged at the moment it was paused,
@@ -96,10 +103,11 @@ def list_tickets(
     priority=None,
     search: str | None = None,
     overdue: bool = False,
+    assignee: str | None = None,
     limit: int | None = None,
     offset: int = 0,
 ) -> list[Ticket]:
-    query = ticket_query(user, status_filter, type_filter, priority, search, overdue)
+    query = ticket_query(user, status_filter, type_filter, priority, search, overdue, assignee)
     # The id breaks ties, so pages never repeat or skip a ticket with the same due time.
     query = query.order_by(Ticket.due_at, Ticket.id).offset(offset)
     if limit is not None:
@@ -223,6 +231,57 @@ def add_comment(
         )
     session.commit()
     return comment
+
+
+UNASSIGNED = "unassigned"
+
+
+def agents(session: Session) -> list[User]:
+    """Everyone who can own a ticket, by name."""
+    return list(
+        session.scalars(select(User).where(User.role == Role.AGENT).order_by(User.username))
+    )
+
+
+def assign_ticket(session: Session, user: User, ticket_id: int, username: str | None) -> Ticket:
+    """Give a ticket to an IT agent, or put it back in the unassigned queue."""
+    if user.role != Role.AGENT:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "IT agents only")
+    ticket = visible_ticket(session, user, ticket_id)
+    assignee = None
+    if username:
+        assignee = session.scalar(select(User).where(User.username == username))
+        if assignee is None or assignee.role != Role.AGENT:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, f"{username} is not an IT agent"
+            )
+    before = ticket.assignee.username if ticket.assignee else UNASSIGNED
+    after = assignee.username if assignee else UNASSIGNED
+    if before == after:
+        return ticket
+    # Set the object, not just the id: sessions here keep objects alive after commit,
+    # so an id alone would leave a stale ticket.assignee behind.
+    ticket.assignee = assignee
+    session.add(
+        AuditEvent(
+            actor=user.username,
+            action="ticket.assign",
+            target=ticket.requester.username,
+            ticket_id=ticket.id,
+            detail=f"{before} -> {after}",
+        )
+    )
+    # Tell the new owner, unless they just picked it up themselves.
+    if assignee is not None and assignee.id != user.id:
+        session.add(
+            InboxMessage(
+                user_id=assignee.id,
+                subject=f"Ticket #{ticket.id} is yours: {ticket.title}",
+                body=f"{user.full_name} assigned this ticket to you.",
+            )
+        )
+    session.commit()
+    return ticket
 
 
 def can_decide(ticket: Ticket, user: User) -> bool:
