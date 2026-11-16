@@ -85,6 +85,12 @@ td.num { font-variant-numeric: tabular-nums; color: var(--muted); }
 .thread .meta { margin: 0 0 4px; font-size: 13px; }
 .thread .meta time { color: var(--muted); margin-left: 6px; }
 .thread li p:last-child { margin: 0; white-space: pre-wrap; }
+.articles { list-style: none; padding: 0; display: grid; gap: 8px; }
+.articles li { display: flex; align-items: center; gap: 8px; }
+.suggest { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; margin: 0 0 16px; }
+.suggest h2 { font-size: 15px; margin: 0 0 6px; }
+.suggest ul { margin: 0; padding-left: 18px; }
+
 .rate fieldset { border: 0; padding: 0; margin: 0 0 8px; }
 .rate legend { font-weight: 600; padding: 0; }
 .rate .score { display: inline-block; margin-right: 12px; font-weight: 400; }

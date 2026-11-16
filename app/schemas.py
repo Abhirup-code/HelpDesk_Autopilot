@@ -41,6 +41,14 @@ DETAIL_MODELS: dict[TicketType, type[BaseModel]] = {
 }
 
 
+class ArticleOut(BaseModel):
+    slug: str
+    title: str
+    body: str | None = None
+    ticket_type: TicketType | None = None
+    views: int = 0
+
+
 class RatingCreate(BaseModel):
     score: int = Field(ge=1, le=5, description="1 is poor, 5 is excellent")
     comment: str | None = Field(default=None, max_length=1000)

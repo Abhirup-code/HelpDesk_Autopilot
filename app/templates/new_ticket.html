@@ -6,6 +6,12 @@
   {% if errors %}
   <div class="error" role="alert"><p>Please fix this:</p><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
   {% endif %}
+  {% if suggestions %}
+  <aside class="suggest">
+    <h2>Before you do, one of these may answer it</h2>
+    <ul>{% for a in suggestions %}<li><a href="/kb/{{ a.slug }}">{{ a.title }}</a></li>{% endfor %}</ul>
+  </aside>
+  {% endif %}
   <form method="post" action="/tickets/new" class="stack" id="new-ticket">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>What do you need?

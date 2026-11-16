@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import services
+from app import knowledge, services
 from app.directory import Directory
 from app.models import AuditEvent, Priority, Role, Status, TicketType, User, aware, utcnow
 from app.policy import DEPARTMENTS, MIN_PASSWORD_LENGTH, REQUESTABLE_GROUPS
@@ -184,7 +184,7 @@ def install_portal(
     def nav_for(user: User | None) -> list[tuple[str, str]]:
         if user is None:
             return []
-        items = [("/tickets", "Tickets"), ("/tickets/new", "New request")]
+        items = [("/tickets", "Tickets"), ("/tickets/new", "New request"), ("/kb", "Help")]
         if user.role in (Role.MANAGER, Role.AGENT):
             items.append(("/approvals", "Approvals"))
         items.append(("/inbox", "Inbox"))
@@ -307,7 +307,45 @@ def install_portal(
             user = signed_in(request, session)
         except HTTPException as exc:
             return error_page(request, None, exc)
-        return render(request, "new_ticket.html", user=user, **form_options(user), form={})
+        chosen = request.query_params.get("type", "")
+        suggestions = []
+        if chosen in {t.value for t in TicketType}:
+            suggestions = knowledge.suggestions_for(session, TicketType(chosen))
+        return render(
+            request,
+            "new_ticket.html",
+            user=user,
+            **form_options(user),
+            form={"type": chosen} if chosen else {},
+            suggestions=suggestions,
+        )
+
+    # -- knowledge base ------------------------------------------------------------------
+
+    @router.get("/kb")
+    def kb_page(request: Request, q: str = "", session: Session = Depends(get_session)) -> Response:
+        try:
+            user = signed_in(request, session)
+        except HTTPException as exc:
+            return error_page(request, None, exc)
+        q = q.strip()[:100]
+        return render(
+            request, "kb.html", user=user, articles=knowledge.search_articles(session, q), q=q
+        )
+
+    @router.get("/kb/{slug}")
+    def kb_article_page(
+        request: Request, slug: str, session: Session = Depends(get_session)
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+        except HTTPException as exc:
+            return error_page(request, None, exc)
+        article = knowledge.read_article(session, slug)
+        if article is None:
+            return error_page(request, user, HTTPException(404, "No such help page."))
+        return render(request, "kb_article.html", user=user, article=article)
 
     @router.post("/tickets/new")
     async def create_ticket(request: Request, session: Session = Depends(get_session)) -> Response:

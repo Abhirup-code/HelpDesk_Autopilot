@@ -168,6 +168,21 @@ class Ticket(Base):
         self.resolved_at = now if status in CLOSED_STATUSES else None
 
 
+class KnowledgeArticle(Base):
+    """A help page people can read before raising a ticket, or be pointed at instead."""
+
+    __tablename__ = "kb_articles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    # The kind of request this answers, so the new ticket form can offer it. None
+    # means it is general and shows up only in search.
+    ticket_type: Mapped[TicketType | None] = mapped_column(str_enum(TicketType), nullable=True)
+    views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
 class TicketComment(Base):
     """A reply on a ticket. Internal notes are for IT only and never shown to the requester."""
 

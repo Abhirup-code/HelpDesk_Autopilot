@@ -549,3 +549,44 @@ def test_a_score_outside_the_range_is_refused_by_the_page(portal):
     resolve_ticket_one(portal)
     sign_in(portal, "emma")
     assert submit(portal, "/tickets/1/rating", "/tickets/1", score="9").status_code == 400
+
+
+def test_the_help_page_lists_and_searches_articles(portal):
+    sign_in(portal, "emma")
+    page = portal.get("/kb").text
+    assert "I forgot my password" in page
+    found = portal.get("/kb?q=printer").text
+    assert "The printer will not print" in found
+    assert "I forgot my password" not in found
+
+
+def test_a_search_with_no_matches_offers_a_ticket(portal):
+    sign_in(portal, "emma")
+    page = portal.get("/kb?q=zzzznothing").text
+    assert "Nothing matched" in page and "/tickets/new" in page
+
+
+def test_reading_an_article_shows_its_text(portal):
+    sign_in(portal, "emma")
+    page = portal.get("/kb/laptop-will-not-charge").text
+    assert "Try a different outlet" in page
+    assert "Raise a ticket" in page
+
+
+def test_an_unknown_article_is_a_404_page(portal):
+    sign_in(portal, "emma")
+    assert portal.get("/kb/no-such-page").status_code == 404
+
+
+def test_the_new_request_form_suggests_help_for_the_chosen_type(portal):
+    sign_in(portal, "emma")
+    assert "may answer it" not in portal.get("/tickets/new").text
+    page = portal.get("/tickets/new?type=hardware").text
+    assert "may answer it" in page
+    assert "My laptop will not charge" in page
+    assert "I forgot my password" not in page
+
+
+def test_help_is_in_the_navigation(portal):
+    sign_in(portal, "emma")
+    assert 'href="/kb"' in portal.get("/tickets").text

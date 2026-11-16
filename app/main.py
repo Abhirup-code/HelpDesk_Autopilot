@@ -8,9 +8,10 @@ from sqlalchemy import text
 from app.auth import make_current_user
 from app.db import init_db, make_engine, make_session_factory, session_dependency
 from app.directory import Directory, directory_from_env
+from app.knowledge import install_starter_articles
 from app.metrics import install_metrics
 from app.portal import install_portal
-from app.routes import accounts, approvals, tickets
+from app.routes import accounts, approvals, knowledge, tickets
 
 
 def create_app(
@@ -21,6 +22,10 @@ def create_app(
     engine = make_engine(database_url)
     init_db(engine)
     factory = make_session_factory(engine)
+    with factory() as session:
+        # A help desk with an empty knowledge base helps nobody, so the starter
+        # articles are written in on first start and left alone after that.
+        install_starter_articles(session)
     get_session = session_dependency(factory)
     current_user = make_current_user(get_session)
     directory = directory if directory is not None else directory_from_env()
@@ -71,6 +76,7 @@ def create_app(
     app.include_router(tickets.build_router(get_session, current_user, directory, base_url))
     app.include_router(accounts.build_router(get_session, current_user, directory, base_url))
     app.include_router(approvals.build_router(get_session, current_user, directory, base_url))
+    app.include_router(knowledge.build_router(get_session, current_user))
     grafana_url = os.environ.get("GRAFANA_URL", "http://127.0.0.1:3000")
     install_portal(app, get_session, directory, base_url, grafana_url)
     return app
