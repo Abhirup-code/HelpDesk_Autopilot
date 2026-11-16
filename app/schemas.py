@@ -41,6 +41,10 @@ DETAIL_MODELS: dict[TicketType, type[BaseModel]] = {
 }
 
 
+class PriorityUpdate(BaseModel):
+    priority: Priority
+
+
 class ReopenRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500, description="What is still wrong")
 

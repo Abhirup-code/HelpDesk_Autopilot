@@ -26,7 +26,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app import services
 from app.directory import Directory
-from app.models import AuditEvent, Role, Status, TicketType, User, aware, utcnow
+from app.models import AuditEvent, Priority, Role, Status, TicketType, User, aware, utcnow
 from app.policy import DEPARTMENTS, MIN_PASSWORD_LENGTH, REQUESTABLE_GROUPS
 from app.routes.approvals import csv_download
 from app.schemas import TicketCreate
@@ -368,9 +368,30 @@ def install_portal(
             comments=services.list_comments(session, user, ticket.id),
             agents=services.agents(session) if user.role == Role.AGENT else [],
             can_reopen=ticket.status in services.REOPENABLE,
+            priorities=[p.value for p in Priority],
             breached=ticket.is_breached(),
             statuses=[s.value for s in Status if s in services.MANUAL_STATUSES],
         )
+
+    @router.post("/tickets/{ticket_id}/priority")
+    def ticket_priority(
+        request: Request,
+        ticket_id: int,
+        priority: str = Form(...),
+        csrf: str = Form(""),
+        session: Session = Depends(get_session),
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+            check_csrf(request, csrf)
+            ticket = services.change_priority(session, user, ticket_id, Priority(priority))
+        except HTTPException as exc:
+            return error_page(request, user, exc)
+        except ValueError:
+            return error_page(request, user, HTTPException(400, "Unknown priority."))
+        flash(request, f"Priority set to {ticket.priority.value}.")
+        return go(f"/tickets/{ticket.id}")
 
     @router.post("/tickets/{ticket_id}/reopen")
     def ticket_reopen(

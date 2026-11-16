@@ -20,6 +20,7 @@ from app.models import (
     CLOSED_STATUSES,
     AuditEvent,
     InboxMessage,
+    Priority,
     ResetToken,
     Role,
     Status,
@@ -349,6 +350,40 @@ def assign_ticket(session: Session, user: User, ticket_id: int, username: str | 
                 body=f"{user.full_name} assigned this ticket to you.",
             )
         )
+    session.commit()
+    return ticket
+
+
+def change_priority(session: Session, user: User, ticket_id: int, new: Priority) -> Ticket:
+    """Raise or lower a ticket's priority, moving its due time to match."""
+    if user.role != Role.AGENT:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "IT agents only")
+    ticket = visible_ticket(session, user, ticket_id)
+    if ticket.status in CLOSED_STATUSES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "This ticket is closed, so its priority is final"
+        )
+    old = ticket.priority
+    if new == old:
+        return ticket
+    created = aware(ticket.created_at)
+    details = ticket.details or {}
+    # Move the due time by the difference between the two targets, rather than
+    # recalculating it from scratch. That keeps any time the clock spent paused,
+    # and keeps the date rules (a new hire's start date) in charge where they apply.
+    was = sla.ticket_due_at(ticket.type, old, created, details)
+    now_due = sla.ticket_due_at(ticket.type, new, created, details)
+    ticket.priority = new
+    ticket.due_at = aware(ticket.due_at) + (now_due - was)
+    session.add(
+        AuditEvent(
+            actor=user.username,
+            action="ticket.priority",
+            target=ticket.requester.username,
+            ticket_id=ticket.id,
+            detail=f"{old.value} -> {new.value}",
+        )
+    )
     session.commit()
     return ticket
 

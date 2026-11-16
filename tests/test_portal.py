@@ -493,3 +493,22 @@ def test_a_resolved_ticket_offers_a_reopen_box(portal):
     page = portal.get("/tickets/1").text
     assert "Reopened: Jammed again." in page
     assert "1 time" in page
+
+
+def test_an_agent_can_change_priority_from_the_page(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Second monitor not detected")
+    assert 'name="priority"' not in portal.get("/tickets/1").text
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    submit(portal, "/tickets/1/priority", "/tickets/1", priority="P1")
+    assert ">P1<" in portal.get("/tickets/1").text
+
+
+def test_an_unknown_priority_from_the_page_is_refused(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Second monitor not detected")
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+    sign_in(portal, "ava")
+    assert submit(portal, "/tickets/1/priority", "/tickets/1", priority="P9").status_code == 400

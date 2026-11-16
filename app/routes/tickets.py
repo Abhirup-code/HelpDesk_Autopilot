@@ -11,6 +11,7 @@ from app.schemas import (
     CommentCreate,
     CommentOut,
     ErrorOut,
+    PriorityUpdate,
     ReopenRequest,
     StatusUpdate,
     TicketCreate,
@@ -117,6 +118,20 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         session: Session = Depends(get_session),
     ) -> TicketOut:
         return serialize(services.change_status(session, user, ticket_id, body.status))
+
+    @router.patch(
+        "/{ticket_id}/priority",
+        response_model=TicketOut,
+        responses={**FORBIDDEN, **NOT_FOUND},
+    )
+    def update_priority(
+        ticket_id: int,
+        body: PriorityUpdate,
+        user: User = Depends(current_user),
+        session: Session = Depends(get_session),
+    ) -> TicketOut:
+        """Change the priority. The due time moves with it."""
+        return serialize(services.change_priority(session, user, ticket_id, body.priority))
 
     @router.post(
         "/{ticket_id}/reopen",
