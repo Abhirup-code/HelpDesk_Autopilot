@@ -369,9 +369,33 @@ def install_portal(
             agents=services.agents(session) if user.role == Role.AGENT else [],
             can_reopen=ticket.status in services.REOPENABLE,
             priorities=[p.value for p in Priority],
+            can_rate=ticket.status in services.RATEABLE
+            and ticket.satisfaction is None
+            and ticket.requester_id == user.id,
             breached=ticket.is_breached(),
             statuses=[s.value for s in Status if s in services.MANUAL_STATUSES],
         )
+
+    @router.post("/tickets/{ticket_id}/rating")
+    def ticket_rating(
+        request: Request,
+        ticket_id: int,
+        score: int = Form(...),
+        comment: str = Form(""),
+        csrf: str = Form(""),
+        session: Session = Depends(get_session),
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+            check_csrf(request, csrf)
+            if not 1 <= score <= 5:
+                raise HTTPException(400, "A score runs from 1 to 5.")
+            services.rate_ticket(session, user, ticket_id, score, comment)
+        except HTTPException as exc:
+            return error_page(request, user, exc)
+        flash(request, "Thanks, that helps.")
+        return go(f"/tickets/{ticket_id}")
 
     @router.post("/tickets/{ticket_id}/priority")
     def ticket_priority(

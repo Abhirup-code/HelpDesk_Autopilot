@@ -354,6 +354,41 @@ def assign_ticket(session: Session, user: User, ticket_id: int, username: str | 
     return ticket
 
 
+RATEABLE = {Status.RESOLVED, Status.AUTO_RESOLVED}
+
+
+def rate_ticket(
+    session: Session, user: User, ticket_id: int, score: int, comment: str | None = None
+) -> Ticket:
+    """Record what the requester thought of the fix. Only they can say, and only once."""
+    ticket = visible_ticket(session, user, ticket_id)
+    if ticket.requester_id != user.id:
+        # An agent rating their own work would make the number meaningless.
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Only the person who raised the ticket can rate it"
+        )
+    if ticket.status not in RATEABLE:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "You can rate a ticket once it is resolved"
+        )
+    if ticket.satisfaction is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "You have already rated this ticket")
+    ticket.satisfaction = score
+    ticket.satisfaction_comment = (comment or "").strip() or None
+    ticket.satisfaction_at = utcnow()
+    session.add(
+        AuditEvent(
+            actor=user.username,
+            action="ticket.rated",
+            target=ticket.requester.username,
+            ticket_id=ticket.id,
+            detail=f"{score} out of 5",
+        )
+    )
+    session.commit()
+    return ticket
+
+
 def change_priority(session: Session, user: User, ticket_id: int, new: Priority) -> Ticket:
     """Raise or lower a ticket's priority, moving its due time to match."""
     if user.role != Role.AGENT:

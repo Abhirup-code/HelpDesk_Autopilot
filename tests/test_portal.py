@@ -512,3 +512,40 @@ def test_an_unknown_priority_from_the_page_is_refused(portal):
     portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
     sign_in(portal, "ava")
     assert submit(portal, "/tickets/1/priority", "/tickets/1", priority="P9").status_code == 400
+
+
+def resolve_ticket_one(portal):
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+    sign_in(portal, "ava")
+    submit(portal, "/tickets/1/status", "/tickets/1", status="resolved")
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+
+def test_a_resolved_ticket_asks_the_requester_how_it_went(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Keyboard keys stick")
+    assert "How did we do?" not in portal.get("/tickets/1").text
+    resolve_ticket_one(portal)
+
+    sign_in(portal, "emma")
+    assert "How did we do?" in portal.get("/tickets/1").text
+    submit(portal, "/tickets/1/rating", "/tickets/1", score="5", comment="Quick, thanks.")
+    page = portal.get("/tickets/1").text
+    assert "5 out of 5" in page and "Quick, thanks." in page
+    assert "How did we do?" not in page  # asked once
+
+
+def test_an_agent_is_not_asked_to_rate_someone_elses_ticket(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Keyboard keys stick")
+    resolve_ticket_one(portal)
+    sign_in(portal, "ava")
+    assert "How did we do?" not in portal.get("/tickets/1").text
+
+
+def test_a_score_outside_the_range_is_refused_by_the_page(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Keyboard keys stick")
+    resolve_ticket_one(portal)
+    sign_in(portal, "emma")
+    assert submit(portal, "/tickets/1/rating", "/tickets/1", score="9").status_code == 400

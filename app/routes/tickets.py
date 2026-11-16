@@ -12,6 +12,7 @@ from app.schemas import (
     CommentOut,
     ErrorOut,
     PriorityUpdate,
+    RatingCreate,
     ReopenRequest,
     StatusUpdate,
     TicketCreate,
@@ -40,6 +41,8 @@ def serialize(ticket: Ticket) -> TicketOut:
         details=ticket.details or {},
         automation_error=ticket.automation_error,
         assignee=ticket.assignee.username if ticket.assignee else None,
+        satisfaction=ticket.satisfaction,
+        satisfaction_comment=ticket.satisfaction_comment,
         reopen_count=ticket.reopen_count,
         first_response_at=ticket.first_response_at,
         first_response_seconds=ticket.first_response_seconds(),
@@ -118,6 +121,24 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
         session: Session = Depends(get_session),
     ) -> TicketOut:
         return serialize(services.change_status(session, user, ticket_id, body.status))
+
+    @router.post(
+        "/{ticket_id}/rating",
+        response_model=TicketOut,
+        responses={
+            **FORBIDDEN,
+            **NOT_FOUND,
+            409: {"model": ErrorOut, "description": "Already rated"},
+        },
+    )
+    def rate(
+        ticket_id: int,
+        body: RatingCreate,
+        user: User = Depends(current_user),
+        session: Session = Depends(get_session),
+    ) -> TicketOut:
+        """Score a resolved ticket from 1 to 5. The requester, once."""
+        return serialize(services.rate_ticket(session, user, ticket_id, body.score, body.comment))
 
     @router.patch(
         "/{ticket_id}/priority",

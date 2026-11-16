@@ -100,6 +100,11 @@ class Ticket(Base):
     # Set when an automation fails, so IT can see why the ticket came to them.
     automation_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # What the requester thought of the fix: 1 to 5, set once after the ticket closes.
+    satisfaction: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    satisfaction_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    satisfaction_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # How many times the ticket came back after being resolved. A fix that does not
     # hold is worse than a slow one, so this is counted rather than hidden.
     reopen_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")

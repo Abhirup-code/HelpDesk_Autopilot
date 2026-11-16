@@ -24,6 +24,25 @@
   <p>{{ ticket.description }}</p>
   {% if ticket.automation_error %}<p class="error">Automation stopped: {{ ticket.automation_error }}. IT will take it from here.</p>{% endif %}
 
+  {% if ticket.satisfaction %}
+  <p class="rated">Rated <strong>{{ ticket.satisfaction }} out of 5</strong>{% if ticket.satisfaction_comment %}: {{ ticket.satisfaction_comment }}{% endif %}</p>
+  {% endif %}
+
+  {% if can_rate %}
+  <form method="post" action="/tickets/{{ ticket.id }}/rating" class="rate">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <fieldset>
+      <legend>How did we do?</legend>
+      {% for n in [1, 2, 3, 4, 5] %}
+      <label class="score"><input type="radio" name="score" value="{{ n }}" required> {{ n }}</label>
+      {% endfor %}
+    </fieldset>
+    <label class="sr-only" for="rating-comment">Anything to add</label>
+    <input id="rating-comment" name="comment" maxlength="1000" placeholder="Anything to add? (optional)">
+    <button type="submit" class="secondary">Send</button>
+  </form>
+  {% endif %}
+
   {% if can_reopen %}
   <form method="post" action="/tickets/{{ ticket.id }}/reopen">
     <input type="hidden" name="csrf" value="{{ csrf }}">

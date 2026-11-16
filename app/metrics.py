@@ -70,6 +70,13 @@ class TicketCollector(Collector):
             "helpdesk_tickets_answered_ratio",
             "Share of tickets that have had a reply",
         )
+        satisfaction = GaugeMetricFamily(
+            "helpdesk_satisfaction_mean",
+            "Average score out of 5 from the people whose tickets were resolved",
+        )
+        rated_rate = GaugeMetricFamily(
+            "helpdesk_tickets_rated_ratio", "Share of resolved tickets the requester scored"
+        )
         audit = CounterMetricFamily(
             "helpdesk_audit_events", "Audit log entries, by action", labels=["action"]
         )
@@ -79,6 +86,7 @@ class TicketCollector(Collector):
         durations: dict[str, list[float]] = {}
         responses: dict[str, list[float]] = {}
         reopens: dict[str, int] = {}
+        scores: list[int] = []
         answered = 0
         on_time = resolved = auto = breached = 0
         for t in tickets:
@@ -95,6 +103,8 @@ class TicketCollector(Collector):
                     continue
                 resolved += 1
                 auto += t.status == Status.AUTO_RESOLVED
+                if t.satisfaction is not None:
+                    scores.append(t.satisfaction)
                 on_time += not t.is_breached()
                 seconds = max((aware(t.resolved_at) - t.work_start()).total_seconds(), 0.0)
                 durations.setdefault(t.type.value, []).append(seconds)
@@ -119,6 +129,8 @@ class TicketCollector(Collector):
         compliance.add_metric([], on_time / resolved if resolved else 1.0)
         auto_rate.add_metric([], auto / resolved if resolved else 0.0)
         answered_rate.add_metric([], answered / len(tickets) if tickets else 0.0)
+        satisfaction.add_metric([], sum(scores) / len(scores) if scores else 0.0)
+        rated_rate.add_metric([], len(scores) / resolved if resolved else 0.0)
 
         yield from (
             open_tickets,
@@ -130,6 +142,8 @@ class TicketCollector(Collector):
             first_response,
             reopened,
             answered_rate,
+            satisfaction,
+            rated_rate,
             audit,
         )
 

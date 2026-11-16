@@ -41,6 +41,11 @@ DETAIL_MODELS: dict[TicketType, type[BaseModel]] = {
 }
 
 
+class RatingCreate(BaseModel):
+    score: int = Field(ge=1, le=5, description="1 is poor, 5 is excellent")
+    comment: str | None = Field(default=None, max_length=1000)
+
+
 class PriorityUpdate(BaseModel):
     priority: Priority
 
@@ -138,6 +143,8 @@ class TicketOut(BaseModel):
     details: dict
     automation_error: str | None
     assignee: str | None = None
+    satisfaction: int | None = None
+    satisfaction_comment: str | None = None
     reopen_count: int = 0
     first_response_at: datetime | None = None
     first_response_seconds: int | None = Field(

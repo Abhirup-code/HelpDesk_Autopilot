@@ -85,6 +85,11 @@ td.num { font-variant-numeric: tabular-nums; color: var(--muted); }
 .thread .meta { margin: 0 0 4px; font-size: 13px; }
 .thread .meta time { color: var(--muted); margin-left: 6px; }
 .thread li p:last-child { margin: 0; white-space: pre-wrap; }
+.rate fieldset { border: 0; padding: 0; margin: 0 0 8px; }
+.rate legend { font-weight: 600; padding: 0; }
+.rate .score { display: inline-block; margin-right: 12px; font-weight: 400; }
+.rated { font-size: 14px; }
+
 .check { display: block; font-weight: 400; margin: 8px 0; }
 .check input { margin-right: 6px; }
 
