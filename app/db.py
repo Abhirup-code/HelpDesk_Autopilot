@@ -93,8 +93,9 @@ def init_db(engine: Engine) -> None:
             grant_dashboard_access(conn)
 
 
-# Tables the Grafana dashboard may read. Users, tokens and reset links stay private.
-DASHBOARD_TABLES = ("tickets", "audit_events")
+# Tables the Grafana dashboard may read. Users, tokens, reset links and the ticket
+# conversation stay private: help articles are public text and a read count.
+DASHBOARD_TABLES = ("tickets", "audit_events", "kb_articles")
 
 
 def grant_dashboard_access(conn) -> None:
