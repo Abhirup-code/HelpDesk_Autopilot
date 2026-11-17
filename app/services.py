@@ -550,13 +550,64 @@ def csv_cell(value: object) -> str:
     return f"'{text}" if text.startswith(FORMULA_STARTS) else text
 
 
+TICKET_CSV_COLUMNS = [
+    "id",
+    "type",
+    "priority",
+    "status",
+    "title",
+    "requester",
+    "assignee",
+    "created_utc",
+    "due_utc",
+    "resolved_utc",
+    "sla_breached",
+    "first_response_seconds",
+    "resolution_seconds",
+    "reopen_count",
+    "satisfaction",
+]
+
+
+def stamp(moment) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ") if moment else ""
+
+
+def ticket_csv(tickets: list[Ticket]) -> str:
+    """The queue as CSV, for the weekly report nobody wants to retype."""
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(TICKET_CSV_COLUMNS)
+    for t in tickets:
+        resolved = aware(t.resolved_at) if t.resolved_at else None
+        row = [
+            t.id,
+            t.type.value,
+            t.priority.value,
+            t.status.value,
+            t.title,
+            t.requester.username,
+            t.assignee.username if t.assignee else "",
+            stamp(aware(t.created_at)),
+            stamp(aware(t.due_at)),
+            stamp(resolved),
+            "yes" if t.is_breached() else "no",
+            t.first_response_seconds(),
+            int((resolved - t.work_start()).total_seconds()) if resolved else None,
+            t.reopen_count,
+            t.satisfaction,
+        ]
+        writer.writerow([csv_cell(value) for value in row])
+    return out.getvalue()
+
+
 def audit_csv(events: list[AuditEvent]) -> str:
     """The audit log as CSV for auditors: one row per entry, newest first."""
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow(AUDIT_CSV_COLUMNS)
     for e in events:
-        when = aware(e.at).strftime("%Y-%m-%dT%H:%M:%SZ")
+        when = stamp(aware(e.at))
         row = [when, e.actor, e.action, e.target, e.ticket_id, e.detail]
         writer.writerow([csv_cell(value) for value in row])
     return out.getvalue()

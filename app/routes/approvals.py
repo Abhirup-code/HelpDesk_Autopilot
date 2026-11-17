@@ -85,9 +85,9 @@ def build_router(get_session, current_user, directory: Directory, base_url: str)
     return router
 
 
-def csv_download(body: str) -> Response:
+def csv_download(body: str, filename: str = "audit-log.csv") -> Response:
     return Response(
         body,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="audit-log.csv"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

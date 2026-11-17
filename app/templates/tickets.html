@@ -38,6 +38,7 @@
   </tbody>
 </table>
 </div>
+<p><a class="download" href="/tickets.csv?show={{ show }}{% if q %}&amp;q={{ q | urlencode }}{% endif %}">Download these {{ tickets | length }} tickets as CSV</a></p>
 {% else %}
 {% if q %}<p class="empty">No tickets match "{{ q }}".</p>
 {% elif show == "overdue" %}<p class="empty">Nothing is past due.</p>

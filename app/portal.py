@@ -181,6 +181,22 @@ def install_portal(
         response.headers["Content-Security-Policy"] = CSP
         return response
 
+    QUEUE_VIEWS = ("open", "overdue", "mine", "unassigned", "all")
+
+    def queue_for(session: Session, user: User, show: str, q: str) -> list:
+        """The tickets behind one queue tab. The page and the download share this."""
+        assignee = None
+        if show == "mine" and user.role == Role.AGENT:
+            assignee = user.username
+        elif show == "unassigned":
+            assignee = services.UNASSIGNED
+        tickets = services.list_tickets(
+            session, user, search=q, overdue=show == "overdue", assignee=assignee
+        )
+        if show in ("open", "mine", "unassigned"):
+            tickets = [t for t in tickets if t.status not in services_closed()]
+        return tickets
+
     def nav_for(user: User | None) -> list[tuple[str, str]]:
         if user is None:
             return []
@@ -593,6 +609,23 @@ def install_portal(
         except HTTPException as exc:
             return error_page(request, user, exc)
         return render(request, "audit.html", user=user, events=events, action=action, target=target)
+
+    @router.get("/tickets.csv")
+    def tickets_download(
+        request: Request,
+        show: str = "open",
+        q: str = "",
+        session: Session = Depends(get_session),
+    ) -> Response:
+        """The queue you are looking at, as a file. Same filters as the page."""
+        user = None
+        try:
+            user = signed_in(request, session)
+        except HTTPException as exc:
+            return error_page(request, None, exc)
+        show = show if show in QUEUE_VIEWS else "open"
+        tickets = queue_for(session, user, show, q.strip()[:100])
+        return csv_download(services.ticket_csv(tickets), "tickets.csv")
 
     @router.get("/audit.csv")
     def audit_download(
