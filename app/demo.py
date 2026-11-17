@@ -17,7 +17,18 @@ from sqlalchemy.orm import Session
 
 from app import sla
 from app.db import init_db, make_engine, make_session_factory
-from app.models import AuditEvent, Priority, Role, Status, Ticket, TicketType, User, utcnow
+from app.models import (
+    AuditEvent,
+    KnowledgeArticle,
+    Priority,
+    Role,
+    Status,
+    Ticket,
+    TicketComment,
+    TicketType,
+    User,
+    utcnow,
+)
 
 # Share of tickets by type, from the BRD's 30-day ticket review.
 TYPE_MIX = {
@@ -41,6 +52,21 @@ GROUPS = ["tableau-users", "vpn-users", "erp-users", "finance-share", "git-users
 FIRST = ["Maya", "Leo", "Priya", "Sam", "Nora", "Omar", "Grace", "Diego", "Hana", "Ivan"]
 LAST = ["Brooks", "Singh", "Lopez", "Nguyen", "Okafor", "Meyer", "Rossi", "Kim", "Shah"]
 DEPARTMENTS = ["Engineering", "Finance", "Operations", "Sales"]
+# What an agent says first. Short, because a first reply usually is.
+FIRST_REPLIES = [
+    "Taking a look now.",
+    "Thanks, I can see it on my side. Working on it.",
+    "Picking this up, I will come back to you shortly.",
+    "Got it. Checking what changed this morning.",
+    "On it. Can you try a different cable while I look?",
+]
+RATING_COMMENTS = {
+    5: ["Sorted the same day, thank you.", "Quick and painless.", ""],
+    4: ["Good, took a little longer than I hoped.", ""],
+    3: ["Fixed in the end.", ""],
+    2: ["Had to chase it twice.", ""],
+    1: ["Took a week and I had to raise it again.", ""],
+}
 
 
 class DemoBuilder:
@@ -51,6 +77,7 @@ class DemoBuilder:
             raise SystemExit("No users yet. Run `python -m app.seed` first.")
         self.employees = [u for u in users if u.manager_id is not None] or users
         self.leads = [u for u in users if u.role in (Role.MANAGER, Role.AGENT)] or users
+        self.agents = [u for u in users if u.role == Role.AGENT] or users
 
     # -- helpers ----------------------------------------------------------
 
@@ -77,6 +104,60 @@ class DemoBuilder:
             ticket.status = Status.IN_PROGRESS if status != Status.AUTO_RESOLVED else Status.NEW
             return
         ticket.status, ticket.resolved_at = status, when
+
+    def worked_by_hand(self, ticket: Ticket, requester: User) -> User:
+        """A ticket somebody actually picked up: owner, first reply, both recorded.
+
+        Automation never says anything, so only these tickets have a reply time.
+        """
+        agent = self.rng.choice(self.agents)
+        ticket.assignee_id = agent.id
+        replied_at = ticket.created_at + timedelta(minutes=self.rng.lognormvariate(3.0, 1.1))
+        if replied_at < self.now:
+            ticket.first_response_at = replied_at
+            self.session.add(
+                TicketComment(
+                    ticket_id=ticket.id,
+                    author_id=agent.id,
+                    body=self.rng.choice(FIRST_REPLIES),
+                    internal=False,
+                    created_at=replied_at,
+                )
+            )
+            self.audit(ticket, agent.username, "ticket.assign", requester.username, replied_at)
+        return agent
+
+    def rate(self, ticket: Ticket) -> None:
+        """Most people never answer the survey, and the ones who do skew happy."""
+        if ticket.resolved_at is None or self.rng.random() > 0.45:
+            return
+        score = self.rng.choices([5, 4, 3, 2, 1], weights=[52, 26, 12, 6, 4])[0]
+        ticket.satisfaction = score
+        ticket.satisfaction_comment = self.rng.choice(RATING_COMMENTS[score]) or None
+        ticket.satisfaction_at = ticket.resolved_at + timedelta(hours=self.rng.uniform(0.5, 36))
+
+    def maybe_reopen(self, ticket: Ticket, requester: User) -> None:
+        """Roughly one fix in twenty does not hold."""
+        if ticket.resolved_at is None or self.rng.random() > 0.05:
+            return
+        back_at = ticket.resolved_at + timedelta(hours=self.rng.uniform(2, 72))
+        if back_at >= self.now:
+            return
+        ticket.reopen_count += 1
+        self.session.add(
+            TicketComment(
+                ticket_id=ticket.id,
+                author_id=requester.id,
+                body="Reopened: it started again this morning.",
+                internal=False,
+                created_at=back_at,
+            )
+        )
+        self.audit(ticket, requester.username, "ticket.reopen", requester.username, back_at)
+        # It was fixed again afterwards, or it would still be open.
+        ticket.resolved_at = back_at + timedelta(hours=self.rng.uniform(1, 24))
+        if ticket.resolved_at >= self.now:
+            ticket.status, ticket.resolved_at = Status.IN_PROGRESS, None
 
     # -- one ticket of each type -----------------------------------------------
 
@@ -128,6 +209,8 @@ class DemoBuilder:
         self.session.add(ticket)
         self.session.flush()
         getattr(self, f"_{ticket_type.value}")(ticket, requester)
+        self.maybe_reopen(ticket, requester)
+        self.rate(ticket)
         return ticket
 
     def _password_reset(self, ticket: Ticket, requester: User) -> None:
@@ -138,6 +221,7 @@ class DemoBuilder:
             )
         else:  # automation failed, IT fixed it by hand
             ticket.automation_error = "Directory did not respond"
+            self.worked_by_hand(ticket, requester)
             self.close(ticket, Status.RESOLVED, timedelta(hours=self.rng.uniform(1, 6)))
 
     def _new_hire(self, ticket: Ticket, requester: User) -> None:
@@ -147,6 +231,7 @@ class DemoBuilder:
             self.audit(ticket, "autopilot", "user.create", username, ticket.created_at)
         else:
             ticket.automation_error = "Group add failed; account rolled back"
+            self.worked_by_hand(ticket, requester)
             self.close(ticket, Status.RESOLVED, timedelta(hours=self.rng.uniform(2, 20)))
 
     def _offboarding(self, ticket: Ticket, requester: User) -> None:
@@ -181,11 +266,13 @@ class DemoBuilder:
             self.audit(ticket, approver, "approval.reject", requester.username, approved_at)
             return
         self.audit(ticket, approver, "approval.manager", requester.username, approved_at)
+        self.worked_by_hand(ticket, requester)
         self.close(ticket, Status.RESOLVED, wait + timedelta(seconds=1))
         self.audit(ticket, "autopilot", "group.add", requester.username, approved_at)
 
     def _hardware(self, ticket: Ticket, requester: User) -> None:
         # Hands-on work: most fixed within the day, some take longer.
+        self.worked_by_hand(ticket, requester)
         hours = self.rng.lognormvariate(1.6, 0.9)
         self.close(ticket, Status.RESOLVED, timedelta(hours=hours))
 
@@ -200,8 +287,16 @@ def load_demo(session: Session, tickets: int = 500, days: int = 30, seed: int = 
     types, weights = zip(*TYPE_MIX.items(), strict=True)
     for _ in range(tickets):
         builder.build(rng.choices(types, weights)[0], builder.created_time(days))
+    read_help_pages(session, rng, tickets)
     session.commit()
     return tickets
+
+
+def read_help_pages(session: Session, rng: random.Random, tickets: int) -> None:
+    """People read the help pages far more often than they raise tickets."""
+    articles = session.scalars(select(KnowledgeArticle)).all()
+    for article in articles:
+        article.views = (article.views or 0) + rng.randint(0, max(tickets // 4, 4))
 
 
 def main() -> None:  # pragma: no cover
