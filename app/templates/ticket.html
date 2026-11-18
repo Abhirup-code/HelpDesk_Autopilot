@@ -11,8 +11,11 @@
     <dt>Type</dt><dd>{{ TYPE_LABELS[ticket.type.value] }}</dd>
     <dt>Priority</dt><dd><span class="prio prio-{{ ticket.priority.value }}">{{ ticket.priority.value }}</span></dd>
     <dt>Requested by</dt><dd>{{ ticket.requester.full_name }}</dd>
+    <dt>Assigned to</dt><dd>{% if ticket.assignee %}{{ ticket.assignee.full_name }}{% else %}<span class="muted">Nobody yet</span>{% endif %}</dd>
     <dt>Created</dt><dd>{{ ticket.created_at | when }}</dd>
     <dt>Due</dt><dd>{{ ticket.due_at | when }}{% if ticket | time_left %} <span class="{{ 'late' if breached else 'left' }}">{{ ticket | time_left }}</span>{% elif breached %} <span class="late">Closed late</span>{% endif %}</dd>
+    {% if ticket.reopen_count %}<dt>Reopened</dt><dd>{{ ticket.reopen_count }} time{{ "s" if ticket.reopen_count > 1 }}</dd>{% endif %}
+    <dt>First reply</dt><dd>{% if ticket.first_response_at %}{{ ticket.first_response_at | when }} <span class="muted">({{ ticket.first_response_seconds() | span }} after it arrived)</span>{% else %}<span class="muted">Waiting for a first reply</span>{% endif %}</dd>
     {% if ticket.resolved_at %}<dt>Closed</dt><dd>{{ ticket.resolved_at | when }}</dd>{% endif %}
     {% for key, value in (ticket.details or {}).items() if key != "demo" %}
     <dt>{{ key.replace('_', ' ') | capitalize }}</dt><dd>{{ value }}</dd>
@@ -20,6 +23,34 @@
   </dl>
   <p>{{ ticket.description }}</p>
   {% if ticket.automation_error %}<p class="error">Automation stopped: {{ ticket.automation_error }}. IT will take it from here.</p>{% endif %}
+
+  {% if ticket.satisfaction %}
+  <p class="rated">Rated <strong>{{ ticket.satisfaction }} out of 5</strong>{% if ticket.satisfaction_comment %}: {{ ticket.satisfaction_comment }}{% endif %}</p>
+  {% endif %}
+
+  {% if can_rate %}
+  <form method="post" action="/tickets/{{ ticket.id }}/rating" class="rate">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <fieldset>
+      <legend>How did we do?</legend>
+      {% for n in [1, 2, 3, 4, 5] %}
+      <label class="score"><input type="radio" name="score" value="{{ n }}" required> {{ n }}</label>
+      {% endfor %}
+    </fieldset>
+    <label class="sr-only" for="rating-comment">Anything to add</label>
+    <input id="rating-comment" name="comment" maxlength="1000" placeholder="Anything to add? (optional)">
+    <button type="submit" class="secondary">Send</button>
+  </form>
+  {% endif %}
+
+  {% if can_reopen %}
+  <form method="post" action="/tickets/{{ ticket.id }}/reopen">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="reopen-reason">Still not fixed? Reopen it</label>
+    <input id="reopen-reason" name="reason" maxlength="500" required placeholder="What is still wrong?">
+    <button type="submit" class="secondary">Reopen</button>
+  </form>
+  {% endif %}
 
   {% if user.role.value == "agent" %}
   <form method="post" action="/tickets/{{ ticket.id }}/status" class="inline">
@@ -29,7 +60,51 @@
     </label>
     <button type="submit">Update</button>
   </form>
+  <form method="post" action="/tickets/{{ ticket.id }}/assignee" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Assigned to
+      <select name="assignee">
+        <option value="">Nobody</option>
+        {% for a in agents %}<option value="{{ a.username }}" {% if ticket.assignee and a.id == ticket.assignee.id %}selected{% endif %}>{{ a.full_name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">Assign</button>
+  </form>
+  {% if not can_reopen and not ticket.resolved_at %}
+  <form method="post" action="/tickets/{{ ticket.id }}/priority" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Priority
+      <select name="priority">{% for p in priorities %}<option value="{{ p }}" {% if p == ticket.priority.value %}selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+    </label>
+    <button type="submit">Set</button>
+  </form>
   {% endif %}
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Conversation{% if comments %} ({{ comments | length }}){% endif %}</h2>
+  {% if comments %}
+  <ol class="thread">
+    {% for c in comments %}
+    <li class="{{ 'note' if c.internal else 'reply' }}">
+      <p class="meta"><strong>{{ c.author.full_name }}</strong> <time>{{ c.created_at | when }}</time>{% if c.internal %} <span class="pill">Internal note</span>{% endif %}</p>
+      <p>{{ c.body }}</p>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="muted">Nothing here yet. Add the first reply.</p>
+  {% endif %}
+  <form method="post" action="/tickets/{{ ticket.id }}/comments">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="comment-body">Add a reply</label>
+    <textarea id="comment-body" name="body" rows="3" maxlength="5000" required placeholder="What should the requester know?"></textarea>
+    {% if user.role.value == "agent" %}
+    <label class="check"><input type="checkbox" name="internal"> Internal note, the requester never sees this</label>
+    {% endif %}
+    <button type="submit">Post</button>
+  </form>
 </section>
 
 {% if history %}

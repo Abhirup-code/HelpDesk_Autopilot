@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ article.title }} · HelpDesk Autopilot{% endblock %}
+{% block content %}
+<p><a href="/kb">← Help</a></p>
+<section class="card">
+  <h1>{{ article.title }}</h1>
+  {% for paragraph in article.body.split("\n\n") %}<p>{{ paragraph }}</p>{% endfor %}
+  <p class="muted small">Did this not solve it?
+    <a href="/tickets/new{% if article.ticket_type %}?type={{ article.ticket_type.value }}{% endif %}">Raise a ticket</a>.
+  </p>
+</section>
+{% endblock %}

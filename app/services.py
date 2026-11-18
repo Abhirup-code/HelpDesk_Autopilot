@@ -6,6 +6,7 @@ codes in both places, so the rules can't drift apart between the two front ends.
 
 import csv
 import io
+from datetime import timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, func, or_, select
@@ -19,10 +20,12 @@ from app.models import (
     CLOSED_STATUSES,
     AuditEvent,
     InboxMessage,
+    Priority,
     ResetToken,
     Role,
     Status,
     Ticket,
+    TicketComment,
     TicketType,
     User,
     aware,
@@ -53,6 +56,7 @@ def ticket_query(
     priority=None,
     search: str | None = None,
     overdue: bool = False,
+    assignee: str | None = None,
 ):
     """The tickets this person may see, narrowed by the filters."""
     query = select(Ticket)
@@ -73,6 +77,12 @@ def ticket_query(
                 Ticket.title.icontains(words, autoescape=True),
                 Ticket.description.icontains(words, autoescape=True),
             )
+        )
+    if assignee == UNASSIGNED:
+        query = query.where(Ticket.assignee_id.is_(None))
+    elif assignee:
+        query = query.where(
+            Ticket.assignee_id == select(User.id).where(User.username == assignee).scalar_subquery()
         )
     if overdue:
         # Still open and past due. A paused ticket is judged at the moment it was paused,
@@ -95,10 +105,11 @@ def list_tickets(
     priority=None,
     search: str | None = None,
     overdue: bool = False,
+    assignee: str | None = None,
     limit: int | None = None,
     offset: int = 0,
 ) -> list[Ticket]:
-    query = ticket_query(user, status_filter, type_filter, priority, search, overdue)
+    query = ticket_query(user, status_filter, type_filter, priority, search, overdue, assignee)
     # The id breaks ties, so pages never repeat or skip a ticket with the same due time.
     query = query.order_by(Ticket.due_at, Ticket.id).offset(offset)
     if limit is not None:
@@ -183,6 +194,229 @@ def change_status(session: Session, user: User, ticket_id: int, new_status: Stat
             target=ticket.requester.username,
             ticket_id=ticket.id,
             detail=f"{old_status.value} -> {new_status.value}",
+        )
+    )
+    session.commit()
+    return ticket
+
+
+def list_comments(session: Session, user: User, ticket_id: int) -> list[TicketComment]:
+    """Comments on a ticket, oldest first. Requesters never see internal notes."""
+    visible_ticket(session, user, ticket_id)
+    query = select(TicketComment).where(TicketComment.ticket_id == ticket_id)
+    if user.role != Role.AGENT:
+        query = query.where(TicketComment.internal.is_(False))
+    return list(session.scalars(query.order_by(TicketComment.created_at, TicketComment.id)))
+
+
+def add_comment(
+    session: Session, user: User, ticket_id: int, body: str, internal: bool = False
+) -> TicketComment:
+    """Add a reply to a ticket. Only IT agents may write an internal note."""
+    ticket = visible_ticket(session, user, ticket_id)
+    if internal and user.role != Role.AGENT:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only IT agents can write internal notes")
+    text = body.strip()
+    if not text:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Comment must not be blank")
+    now = utcnow()
+    comment = TicketComment(
+        ticket_id=ticket.id, author_id=user.id, body=text, internal=internal, created_at=now
+    )
+    session.add(comment)
+    # First reply from anyone but the requester. An internal note is not a reply:
+    # the person waiting has still heard nothing.
+    if not internal and ticket.requester_id != user.id and ticket.first_response_at is None:
+        ticket.first_response_at = now
+    # A reply to someone else's ticket is worth an email, and the requester cannot see
+    # internal notes, so those raise nothing.
+    if not internal and ticket.requester_id != user.id:
+        session.add(
+            InboxMessage(
+                user_id=ticket.requester_id,
+                subject=f"Reply on your ticket #{ticket.id}: {ticket.title}",
+                body=f"{user.full_name} wrote:\n\n{text}",
+            )
+        )
+    session.commit()
+    return comment
+
+
+UNASSIGNED = "unassigned"
+# How long after a ticket closes it can still be reopened. After that the problem
+# is a new one, with its own SLA, rather than the old ticket dragged back to life.
+REOPEN_WINDOW = timedelta(days=7)
+# A rejected request was a decision, not a fix. Ask again with a new ticket.
+REOPENABLE = {Status.RESOLVED, Status.AUTO_RESOLVED}
+
+
+def reopen_ticket(session: Session, user: User, ticket_id: int, reason: str) -> Ticket:
+    """Put a closed ticket back in the queue because the fix did not hold."""
+    ticket = visible_ticket(session, user, ticket_id)
+    if ticket.status not in REOPENABLE:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Only a resolved ticket can be reopened. Raise a new request instead.",
+        )
+    closed_for = utcnow() - aware(ticket.resolved_at)
+    if closed_for > REOPEN_WINDOW:
+        days = REOPEN_WINDOW.days
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"This ticket closed more than {days} days ago. Raise a new request instead.",
+        )
+    text = reason.strip()
+    if not text:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Say what is still wrong when you reopen"
+        )
+    now = utcnow()
+    ticket.reopen_count += 1
+    ticket.set_status(Status.IN_PROGRESS, now)
+    # A fresh clock from now: the old due time is long past and judging the second
+    # attempt by the first one's deadline would mark it late before work restarts.
+    ticket.due_at = sla.due_at(ticket.priority, now)
+    session.add(
+        TicketComment(
+            ticket_id=ticket.id,
+            author_id=user.id,
+            body=f"Reopened: {text}",
+            internal=False,
+            created_at=now,
+        )
+    )
+    session.add(
+        AuditEvent(
+            actor=user.username,
+            action="ticket.reopen",
+            target=ticket.requester.username,
+            ticket_id=ticket.id,
+            detail=f"reopen #{ticket.reopen_count}: {text[:200]}",
+        )
+    )
+    if ticket.assignee is not None and ticket.assignee_id != user.id:
+        session.add(
+            InboxMessage(
+                user_id=ticket.assignee_id,
+                subject=f"Ticket #{ticket.id} is back: {ticket.title}",
+                body=f"{user.full_name} reopened this ticket.\n\n{text}",
+            )
+        )
+    session.commit()
+    return ticket
+
+
+def agents(session: Session) -> list[User]:
+    """Everyone who can own a ticket, by name."""
+    return list(
+        session.scalars(select(User).where(User.role == Role.AGENT).order_by(User.username))
+    )
+
+
+def assign_ticket(session: Session, user: User, ticket_id: int, username: str | None) -> Ticket:
+    """Give a ticket to an IT agent, or put it back in the unassigned queue."""
+    if user.role != Role.AGENT:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "IT agents only")
+    ticket = visible_ticket(session, user, ticket_id)
+    assignee = None
+    if username:
+        assignee = session.scalar(select(User).where(User.username == username))
+        if assignee is None or assignee.role != Role.AGENT:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, f"{username} is not an IT agent"
+            )
+    before = ticket.assignee.username if ticket.assignee else UNASSIGNED
+    after = assignee.username if assignee else UNASSIGNED
+    if before == after:
+        return ticket
+    # Set the object, not just the id: sessions here keep objects alive after commit,
+    # so an id alone would leave a stale ticket.assignee behind.
+    ticket.assignee = assignee
+    session.add(
+        AuditEvent(
+            actor=user.username,
+            action="ticket.assign",
+            target=ticket.requester.username,
+            ticket_id=ticket.id,
+            detail=f"{before} -> {after}",
+        )
+    )
+    # Tell the new owner, unless they just picked it up themselves.
+    if assignee is not None and assignee.id != user.id:
+        session.add(
+            InboxMessage(
+                user_id=assignee.id,
+                subject=f"Ticket #{ticket.id} is yours: {ticket.title}",
+                body=f"{user.full_name} assigned this ticket to you.",
+            )
+        )
+    session.commit()
+    return ticket
+
+
+RATEABLE = {Status.RESOLVED, Status.AUTO_RESOLVED}
+
+
+def rate_ticket(
+    session: Session, user: User, ticket_id: int, score: int, comment: str | None = None
+) -> Ticket:
+    """Record what the requester thought of the fix. Only they can say, and only once."""
+    ticket = visible_ticket(session, user, ticket_id)
+    if ticket.requester_id != user.id:
+        # An agent rating their own work would make the number meaningless.
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Only the person who raised the ticket can rate it"
+        )
+    if ticket.status not in RATEABLE:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "You can rate a ticket once it is resolved"
+        )
+    if ticket.satisfaction is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "You have already rated this ticket")
+    ticket.satisfaction = score
+    ticket.satisfaction_comment = (comment or "").strip() or None
+    ticket.satisfaction_at = utcnow()
+    session.add(
+        AuditEvent(
+            actor=user.username,
+            action="ticket.rated",
+            target=ticket.requester.username,
+            ticket_id=ticket.id,
+            detail=f"{score} out of 5",
+        )
+    )
+    session.commit()
+    return ticket
+
+
+def change_priority(session: Session, user: User, ticket_id: int, new: Priority) -> Ticket:
+    """Raise or lower a ticket's priority, moving its due time to match."""
+    if user.role != Role.AGENT:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "IT agents only")
+    ticket = visible_ticket(session, user, ticket_id)
+    if ticket.status in CLOSED_STATUSES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "This ticket is closed, so its priority is final"
+        )
+    old = ticket.priority
+    if new == old:
+        return ticket
+    created = aware(ticket.created_at)
+    details = ticket.details or {}
+    # Move the due time by the difference between the two targets, rather than
+    # recalculating it from scratch. That keeps any time the clock spent paused,
+    # and keeps the date rules (a new hire's start date) in charge where they apply.
+    was = sla.ticket_due_at(ticket.type, old, created, details)
+    now_due = sla.ticket_due_at(ticket.type, new, created, details)
+    ticket.priority = new
+    ticket.due_at = aware(ticket.due_at) + (now_due - was)
+    session.add(
+        AuditEvent(
+            actor=user.username,
+            action="ticket.priority",
+            target=ticket.requester.username,
+            ticket_id=ticket.id,
+            detail=f"{old.value} -> {new.value}",
         )
     )
     session.commit()
@@ -316,13 +550,64 @@ def csv_cell(value: object) -> str:
     return f"'{text}" if text.startswith(FORMULA_STARTS) else text
 
 
+TICKET_CSV_COLUMNS = [
+    "id",
+    "type",
+    "priority",
+    "status",
+    "title",
+    "requester",
+    "assignee",
+    "created_utc",
+    "due_utc",
+    "resolved_utc",
+    "sla_breached",
+    "first_response_seconds",
+    "resolution_seconds",
+    "reopen_count",
+    "satisfaction",
+]
+
+
+def stamp(moment) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ") if moment else ""
+
+
+def ticket_csv(tickets: list[Ticket]) -> str:
+    """The queue as CSV, for the weekly report nobody wants to retype."""
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(TICKET_CSV_COLUMNS)
+    for t in tickets:
+        resolved = aware(t.resolved_at) if t.resolved_at else None
+        row = [
+            t.id,
+            t.type.value,
+            t.priority.value,
+            t.status.value,
+            t.title,
+            t.requester.username,
+            t.assignee.username if t.assignee else "",
+            stamp(aware(t.created_at)),
+            stamp(aware(t.due_at)),
+            stamp(resolved),
+            "yes" if t.is_breached() else "no",
+            t.first_response_seconds(),
+            int((resolved - t.work_start()).total_seconds()) if resolved else None,
+            t.reopen_count,
+            t.satisfaction,
+        ]
+        writer.writerow([csv_cell(value) for value in row])
+    return out.getvalue()
+
+
 def audit_csv(events: list[AuditEvent]) -> str:
     """The audit log as CSV for auditors: one row per entry, newest first."""
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow(AUDIT_CSV_COLUMNS)
     for e in events:
-        when = aware(e.at).strftime("%Y-%m-%dT%H:%M:%SZ")
+        when = stamp(aware(e.at))
         row = [when, e.actor, e.action, e.target, e.ticket_id, e.detail]
         writer.writerow([csv_cell(value) for value in row])
     return out.getvalue()

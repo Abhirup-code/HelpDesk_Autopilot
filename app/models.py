@@ -3,7 +3,7 @@
 import enum
 from datetime import UTC, date, datetime, time, timedelta
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -83,18 +83,37 @@ class Ticket(Base):
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text)
     requester_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # The IT agent who owns the ticket. None means it is still in the unassigned queue.
+    assignee_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When somebody other than the requester first replied. The number people on a
+    # help desk are judged by, alongside time to resolve.
+    first_response_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # Type-specific fields, e.g. new hire name and start date. See app/schemas.py.
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     # Set when an automation fails, so IT can see why the ticket came to them.
     automation_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # What the requester thought of the fix: 1 to 5, set once after the ticket closes.
+    satisfaction: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    satisfaction_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    satisfaction_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # How many times the ticket came back after being resolved. A fix that does not
+    # hold is worse than a slow one, so this is counted rather than hidden.
+    reopen_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
     # Set while the SLA clock is paused (waiting for a manager).
     paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    requester: Mapped[User] = relationship()
+    requester: Mapped[User] = relationship(foreign_keys=[requester_id])
+    assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id])
 
     def is_breached(self, now: datetime | None = None) -> bool:
         """A ticket breaches its SLA if it was resolved late, or is still open past due."""
@@ -115,6 +134,12 @@ class Ticket(Base):
             return None
         at = aware(self.paused_at) if self.paused_at is not None else (now or utcnow())
         return int((aware(self.due_at) - at).total_seconds())
+
+    def first_response_seconds(self) -> int | None:
+        """Seconds from the ticket arriving to the first reply, or None if nobody has."""
+        if self.first_response_at is None:
+            return None
+        return max(int((aware(self.first_response_at) - aware(self.created_at)).total_seconds()), 0)
 
     def work_start(self) -> datetime:
         """When work on the ticket could begin.
@@ -141,6 +166,38 @@ class Ticket(Base):
             self.paused_at = now
         self.status = status
         self.resolved_at = now if status in CLOSED_STATUSES else None
+
+
+class KnowledgeArticle(Base):
+    """A help page people can read before raising a ticket, or be pointed at instead."""
+
+    __tablename__ = "kb_articles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    # The kind of request this answers, so the new ticket form can offer it. None
+    # means it is general and shows up only in search.
+    ticket_type: Mapped[TicketType | None] = mapped_column(str_enum(TicketType), nullable=True)
+    views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+class TicketComment(Base):
+    """A reply on a ticket. Internal notes are for IT only and never shown to the requester."""
+
+    __tablename__ = "ticket_comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id"), index=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    body: Mapped[str] = mapped_column(Text)
+    internal: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
+
+    author: Mapped[User] = relationship()
 
 
 class AuditEvent(Base):

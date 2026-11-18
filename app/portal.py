@@ -24,9 +24,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import services
+from app import knowledge, services
 from app.directory import Directory
-from app.models import AuditEvent, Role, Status, TicketType, User, aware, utcnow
+from app.models import AuditEvent, Priority, Role, Status, TicketType, User, aware, utcnow
 from app.policy import DEPARTMENTS, MIN_PASSWORD_LENGTH, REQUESTABLE_GROUPS
 from app.routes.approvals import csv_download
 from app.schemas import TicketCreate
@@ -93,7 +93,7 @@ def time_left(ticket) -> str:
     )
 
 
-templates.env.filters.update(linkify=linkify, when=when, time_left=time_left)
+templates.env.filters.update(linkify=linkify, when=when, time_left=time_left, span=span)
 templates.env.globals.update(TYPE_LABELS=TYPE_LABELS, STATUS_LABELS=STATUS_LABELS)
 
 
@@ -181,10 +181,26 @@ def install_portal(
         response.headers["Content-Security-Policy"] = CSP
         return response
 
+    QUEUE_VIEWS = ("open", "overdue", "mine", "unassigned", "all")
+
+    def queue_for(session: Session, user: User, show: str, q: str) -> list:
+        """The tickets behind one queue tab. The page and the download share this."""
+        assignee = None
+        if show == "mine" and user.role == Role.AGENT:
+            assignee = user.username
+        elif show == "unassigned":
+            assignee = services.UNASSIGNED
+        tickets = services.list_tickets(
+            session, user, search=q, overdue=show == "overdue", assignee=assignee
+        )
+        if show in ("open", "mine", "unassigned"):
+            tickets = [t for t in tickets if t.status not in services_closed()]
+        return tickets
+
     def nav_for(user: User | None) -> list[tuple[str, str]]:
         if user is None:
             return []
-        items = [("/tickets", "Tickets"), ("/tickets/new", "New request")]
+        items = [("/tickets", "Tickets"), ("/tickets/new", "New request"), ("/kb", "Help")]
         if user.role in (Role.MANAGER, Role.AGENT):
             items.append(("/approvals", "Approvals"))
         items.append(("/inbox", "Inbox"))
@@ -287,10 +303,17 @@ def install_portal(
             user = signed_in(request, session)
         except HTTPException as exc:
             return error_page(request, None, exc)
-        show = show if show in ("open", "overdue", "all") else "open"
+        show = show if show in ("open", "overdue", "mine", "unassigned", "all") else "open"
         q = q.strip()[:100]
-        tickets = services.list_tickets(session, user, search=q, overdue=show == "overdue")
-        if show == "open":
+        assignee = None
+        if show == "mine" and user.role == Role.AGENT:
+            assignee = user.username
+        elif show == "unassigned":
+            assignee = services.UNASSIGNED
+        tickets = services.list_tickets(
+            session, user, search=q, overdue=show == "overdue", assignee=assignee
+        )
+        if show in ("open", "mine", "unassigned"):
             tickets = [t for t in tickets if t.status not in services_closed()]
         return render(request, "tickets.html", user=user, tickets=tickets, show=show, q=q)
 
@@ -300,7 +323,45 @@ def install_portal(
             user = signed_in(request, session)
         except HTTPException as exc:
             return error_page(request, None, exc)
-        return render(request, "new_ticket.html", user=user, **form_options(user), form={})
+        chosen = request.query_params.get("type", "")
+        suggestions = []
+        if chosen in {t.value for t in TicketType}:
+            suggestions = knowledge.suggestions_for(session, TicketType(chosen))
+        return render(
+            request,
+            "new_ticket.html",
+            user=user,
+            **form_options(user),
+            form={"type": chosen} if chosen else {},
+            suggestions=suggestions,
+        )
+
+    # -- knowledge base ------------------------------------------------------------------
+
+    @router.get("/kb")
+    def kb_page(request: Request, q: str = "", session: Session = Depends(get_session)) -> Response:
+        try:
+            user = signed_in(request, session)
+        except HTTPException as exc:
+            return error_page(request, None, exc)
+        q = q.strip()[:100]
+        return render(
+            request, "kb.html", user=user, articles=knowledge.search_articles(session, q), q=q
+        )
+
+    @router.get("/kb/{slug}")
+    def kb_article_page(
+        request: Request, slug: str, session: Session = Depends(get_session)
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+        except HTTPException as exc:
+            return error_page(request, None, exc)
+        article = knowledge.read_article(session, slug)
+        if article is None:
+            return error_page(request, user, HTTPException(404, "No such help page."))
+        return render(request, "kb_article.html", user=user, article=article)
 
     @router.post("/tickets/new")
     async def create_ticket(request: Request, session: Session = Depends(get_session)) -> Response:
@@ -358,9 +419,113 @@ def install_portal(
             user=user,
             ticket=ticket,
             history=history,
+            comments=services.list_comments(session, user, ticket.id),
+            agents=services.agents(session) if user.role == Role.AGENT else [],
+            can_reopen=ticket.status in services.REOPENABLE,
+            priorities=[p.value for p in Priority],
+            can_rate=ticket.status in services.RATEABLE
+            and ticket.satisfaction is None
+            and ticket.requester_id == user.id,
             breached=ticket.is_breached(),
             statuses=[s.value for s in Status if s in services.MANUAL_STATUSES],
         )
+
+    @router.post("/tickets/{ticket_id}/rating")
+    def ticket_rating(
+        request: Request,
+        ticket_id: int,
+        score: int = Form(...),
+        comment: str = Form(""),
+        csrf: str = Form(""),
+        session: Session = Depends(get_session),
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+            check_csrf(request, csrf)
+            if not 1 <= score <= 5:
+                raise HTTPException(400, "A score runs from 1 to 5.")
+            services.rate_ticket(session, user, ticket_id, score, comment)
+        except HTTPException as exc:
+            return error_page(request, user, exc)
+        flash(request, "Thanks, that helps.")
+        return go(f"/tickets/{ticket_id}")
+
+    @router.post("/tickets/{ticket_id}/priority")
+    def ticket_priority(
+        request: Request,
+        ticket_id: int,
+        priority: str = Form(...),
+        csrf: str = Form(""),
+        session: Session = Depends(get_session),
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+            check_csrf(request, csrf)
+            ticket = services.change_priority(session, user, ticket_id, Priority(priority))
+        except HTTPException as exc:
+            return error_page(request, user, exc)
+        except ValueError:
+            return error_page(request, user, HTTPException(400, "Unknown priority."))
+        flash(request, f"Priority set to {ticket.priority.value}.")
+        return go(f"/tickets/{ticket.id}")
+
+    @router.post("/tickets/{ticket_id}/reopen")
+    def ticket_reopen(
+        request: Request,
+        ticket_id: int,
+        reason: str = Form(""),
+        csrf: str = Form(""),
+        session: Session = Depends(get_session),
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+            check_csrf(request, csrf)
+            services.reopen_ticket(session, user, ticket_id, reason)
+        except HTTPException as exc:
+            return error_page(request, user, exc)
+        flash(request, "Ticket reopened.")
+        return go(f"/tickets/{ticket_id}")
+
+    @router.post("/tickets/{ticket_id}/assignee")
+    def ticket_assignee(
+        request: Request,
+        ticket_id: int,
+        assignee: str = Form(""),
+        csrf: str = Form(""),
+        session: Session = Depends(get_session),
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+            check_csrf(request, csrf)
+            ticket = services.assign_ticket(session, user, ticket_id, assignee or None)
+        except HTTPException as exc:
+            return error_page(request, user, exc)
+        who = ticket.assignee.full_name if ticket.assignee else "nobody"
+        flash(request, f"Ticket assigned to {who}.")
+        return go(f"/tickets/{ticket.id}")
+
+    @router.post("/tickets/{ticket_id}/comments")
+    def ticket_comment(
+        request: Request,
+        ticket_id: int,
+        body: str = Form(...),
+        internal: str = Form(""),
+        csrf: str = Form(""),
+        session: Session = Depends(get_session),
+    ) -> Response:
+        user = None
+        try:
+            user = signed_in(request, session)
+            check_csrf(request, csrf)
+            services.add_comment(session, user, ticket_id, body, internal == "on")
+        except HTTPException as exc:
+            return error_page(request, user, exc)
+        flash(request, "Note added." if internal == "on" else "Reply posted.")
+        return go(f"/tickets/{ticket_id}")
 
     @router.post("/tickets/{ticket_id}/status")
     def ticket_status(
@@ -444,6 +609,23 @@ def install_portal(
         except HTTPException as exc:
             return error_page(request, user, exc)
         return render(request, "audit.html", user=user, events=events, action=action, target=target)
+
+    @router.get("/tickets.csv")
+    def tickets_download(
+        request: Request,
+        show: str = "open",
+        q: str = "",
+        session: Session = Depends(get_session),
+    ) -> Response:
+        """The queue you are looking at, as a file. Same filters as the page."""
+        user = None
+        try:
+            user = signed_in(request, session)
+        except HTTPException as exc:
+            return error_page(request, None, exc)
+        show = show if show in QUEUE_VIEWS else "open"
+        tickets = queue_for(session, user, show, q.strip()[:100])
+        return csv_download(services.ticket_csv(tickets), "tickets.csv")
 
     @router.get("/audit.csv")
     def audit_download(

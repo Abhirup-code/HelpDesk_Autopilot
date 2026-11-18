@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Help · HelpDesk Autopilot{% endblock %}
+{% block content %}
+<div class="heading">
+  <h1>Help</h1>
+  <a class="button" href="/tickets/new">New request</a>
+</div>
+<p class="lede">Most problems here have an answer already. Have a look before raising a ticket.</p>
+<form method="get" action="/kb" class="inline search" role="search">
+  <label class="sr-only" for="q">Search help</label>
+  <input id="q" name="q" type="search" value="{{ q }}" maxlength="100" placeholder="What is the problem?">
+  <button type="submit" class="secondary">Search</button>
+  {% if q %}<a href="/kb">Clear</a>{% endif %}
+</form>
+{% if articles %}
+<ul class="articles">
+  {% for a in articles %}
+  <li>
+    <a href="/kb/{{ a.slug }}">{{ a.title }}</a>
+    {% if a.ticket_type %}<span class="pill">{{ TYPE_LABELS[a.ticket_type.value] }}</span>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">Nothing matched “{{ q }}”. <a href="/tickets/new">Raise a ticket</a> and we will take a look.</p>
+{% endif %}
+{% endblock %}

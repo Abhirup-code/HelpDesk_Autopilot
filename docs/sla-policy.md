@@ -11,6 +11,14 @@ The SLA clock starts when a ticket is created and stops when it is resolved. Tim
 | P3 Normal | Impact with a workaround | 1 business day |
 | P4 Low | Request or question | 3 business days |
 
+## Business hours
+
+The help desk is open 09:00 to 17:00 UTC, Monday to Friday, and closed on the dates in `HELPDESK_HOLIDAYS` (a comma-separated list of `YYYY-MM-DD`, defaulting to the usual US public holidays).
+
+A business-day target starts counting from the next moment the desk is open. A P3 raised at 23:10 on Wednesday starts at 09:00 on Thursday and is due at 09:00 on Friday, rather than being due at 23:10 on Thursday when nobody is there.
+
+P1 and P2 ignore business hours entirely. Something urgent is urgent at two in the morning.
+
 ## Default priority by ticket type
 
 | Ticket type | Default priority | Notes |

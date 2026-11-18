@@ -388,3 +388,205 @@ def test_past_due_tab_lists_only_late_open_tickets(portal, app):
     assert "late by 3h 0m" in page
     # An unknown tab falls back to the open list instead of failing.
     assert portal.get("/tickets?show=nonsense").status_code == 200
+
+
+def test_the_ticket_page_takes_a_reply(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Monitor flickers")
+    path = "/tickets/1"
+    submit(portal, f"{path}/comments", path, body="It started this morning.")
+    page = portal.get(path).text
+    assert "It started this morning." in page
+    assert "Emma Ruiz" in page
+
+
+def test_an_employee_is_not_offered_the_internal_note_box(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Monitor flickers")
+    assert 'name="internal"' not in portal.get("/tickets/1").text
+
+
+def test_an_agent_gets_the_internal_note_box_and_the_requester_does_not_see_the_note(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Monitor flickers")
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    assert 'name="internal"' in portal.get("/tickets/1").text
+    submit(portal, "/tickets/1/comments", "/tickets/1", body="Dock is faulty.", internal="on")
+    assert "Internal note" in portal.get("/tickets/1").text
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "emma")
+    page = portal.get("/tickets/1").text
+    assert "Dock is faulty." not in page
+    assert "Internal note" not in page
+
+
+def test_an_empty_conversation_says_so(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Monitor flickers")
+    assert "Nothing here yet" in portal.get("/tickets/1").text
+
+
+def test_an_agent_can_assign_a_ticket_from_the_page(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Monitor flickers")
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    assert "Nobody yet" in portal.get("/tickets/1").text
+    submit(portal, "/tickets/1/assignee", "/tickets/1", assignee="ava")
+    assert "Ava Patel" in portal.get("/tickets/1").text
+
+
+def test_the_queue_has_mine_and_unassigned_tabs_for_agents_only(portal):
+    sign_in(portal, "emma")
+    assert "show=mine" not in portal.get("/tickets").text
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    page = portal.get("/tickets").text
+    assert "show=mine" in page and "show=unassigned" in page
+
+
+def test_the_mine_tab_shows_only_tickets_you_own(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Mine to fix")
+    new_ticket(portal, type="hardware", title="Someone elses")
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    submit(portal, "/tickets/1/assignee", "/tickets/1", assignee="ava")
+    mine = portal.get("/tickets?show=mine").text
+    assert "Mine to fix" in mine and "Someone elses" not in mine
+    waiting = portal.get("/tickets?show=unassigned").text
+    assert "Someone elses" in waiting and "Mine to fix" not in waiting
+
+
+def test_the_ticket_page_shows_when_the_first_reply_came(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Docking station is dead")
+    assert "Waiting for a first reply" in portal.get("/tickets/1").text
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    submit(portal, "/tickets/1/comments", "/tickets/1", body="Looking at it now.")
+    page = portal.get("/tickets/1").text
+    assert "Waiting for a first reply" not in page
+    assert "after it arrived" in page
+
+
+def test_a_resolved_ticket_offers_a_reopen_box(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Printer jams")
+    assert "Still not fixed?" not in portal.get("/tickets/1").text
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    submit(portal, "/tickets/1/status", "/tickets/1", status="resolved")
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "emma")
+    assert "Still not fixed?" in portal.get("/tickets/1").text
+    submit(portal, "/tickets/1/reopen", "/tickets/1", reason="Jammed again.")
+    page = portal.get("/tickets/1").text
+    assert "Reopened: Jammed again." in page
+    assert "1 time" in page
+
+
+def test_an_agent_can_change_priority_from_the_page(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Second monitor not detected")
+    assert 'name="priority"' not in portal.get("/tickets/1").text
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+    sign_in(portal, "ava")
+    submit(portal, "/tickets/1/priority", "/tickets/1", priority="P1")
+    assert ">P1<" in portal.get("/tickets/1").text
+
+
+def test_an_unknown_priority_from_the_page_is_refused(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Second monitor not detected")
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+    sign_in(portal, "ava")
+    assert submit(portal, "/tickets/1/priority", "/tickets/1", priority="P9").status_code == 400
+
+
+def resolve_ticket_one(portal):
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+    sign_in(portal, "ava")
+    submit(portal, "/tickets/1/status", "/tickets/1", status="resolved")
+    portal.post("/logout", data={"csrf": csrf(portal, "/tickets")})
+
+
+def test_a_resolved_ticket_asks_the_requester_how_it_went(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Keyboard keys stick")
+    assert "How did we do?" not in portal.get("/tickets/1").text
+    resolve_ticket_one(portal)
+
+    sign_in(portal, "emma")
+    assert "How did we do?" in portal.get("/tickets/1").text
+    submit(portal, "/tickets/1/rating", "/tickets/1", score="5", comment="Quick, thanks.")
+    page = portal.get("/tickets/1").text
+    assert "5 out of 5" in page and "Quick, thanks." in page
+    assert "How did we do?" not in page  # asked once
+
+
+def test_an_agent_is_not_asked_to_rate_someone_elses_ticket(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Keyboard keys stick")
+    resolve_ticket_one(portal)
+    sign_in(portal, "ava")
+    assert "How did we do?" not in portal.get("/tickets/1").text
+
+
+def test_a_score_outside_the_range_is_refused_by_the_page(portal):
+    sign_in(portal, "emma")
+    new_ticket(portal, type="hardware", title="Keyboard keys stick")
+    resolve_ticket_one(portal)
+    sign_in(portal, "emma")
+    assert submit(portal, "/tickets/1/rating", "/tickets/1", score="9").status_code == 400
+
+
+def test_the_help_page_lists_and_searches_articles(portal):
+    sign_in(portal, "emma")
+    page = portal.get("/kb").text
+    assert "I forgot my password" in page
+    found = portal.get("/kb?q=printer").text
+    assert "The printer will not print" in found
+    assert "I forgot my password" not in found
+
+
+def test_a_search_with_no_matches_offers_a_ticket(portal):
+    sign_in(portal, "emma")
+    page = portal.get("/kb?q=zzzznothing").text
+    assert "Nothing matched" in page and "/tickets/new" in page
+
+
+def test_reading_an_article_shows_its_text(portal):
+    sign_in(portal, "emma")
+    page = portal.get("/kb/laptop-will-not-charge").text
+    assert "Try a different outlet" in page
+    assert "Raise a ticket" in page
+
+
+def test_an_unknown_article_is_a_404_page(portal):
+    sign_in(portal, "emma")
+    assert portal.get("/kb/no-such-page").status_code == 404
+
+
+def test_the_new_request_form_suggests_help_for_the_chosen_type(portal):
+    sign_in(portal, "emma")
+    assert "may answer it" not in portal.get("/tickets/new").text
+    page = portal.get("/tickets/new?type=hardware").text
+    assert "may answer it" in page
+    assert "My laptop will not charge" in page
+    assert "I forgot my password" not in page
+
+
+def test_help_is_in_the_navigation(portal):
+    sign_in(portal, "emma")
+    assert 'href="/kb"' in portal.get("/tickets").text

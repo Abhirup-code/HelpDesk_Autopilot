@@ -70,3 +70,19 @@ def test_dashboard_query_runs_on_postgres(app, sql):
         load_demo(session, tickets=120)
         rows = session.execute(text(expand_grafana_macros(sql))).all()
     assert rows, "query returned no rows on demo data"
+
+
+def test_the_service_quality_panels_query_the_new_columns():
+    """The panels added with first reply, satisfaction and reopens must read the
+    columns those features write, or they quietly show nothing forever."""
+    panels = {p["title"]: p for p in PANELS if p.get("targets")}
+    checks = {
+        "Median time to first reply": "first_response_at",
+        "Tickets answered": "first_response_at",
+        "Satisfaction": "satisfaction",
+        "Reopened after resolving": "reopen_count",
+        "Help pages people actually read": "kb_articles",
+    }
+    for title, column in checks.items():
+        sql = panels[title]["targets"][0]["rawSql"]
+        assert column in sql, f"{title} does not read {column}"

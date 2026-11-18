@@ -2,11 +2,17 @@
 must keep existing data."""
 
 from alembic.autogenerate import compare_metadata
+from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 
 from app.db import Base, init_db, make_engine
 from tests.conftest import TEST_DB, drop_everything
+
+# Read the newest revision from the migration files, so adding one does not break
+# these tests; what they check is that the database ends up at whatever head is.
+HEAD = ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
 
 
 def fresh_engine(tmp_path):
@@ -43,7 +49,7 @@ def test_upgrading_keeps_existing_data(tmp_path):
     init_db(engine)  # as on the next deploy
     with engine.connect() as conn:
         assert conn.execute(text("SELECT full_name FROM users")).scalar() == "Keep Me"
-    assert version(engine) == "0001"
+    assert version(engine) == HEAD
 
 
 def test_database_from_before_migrations_is_adopted(tmp_path):
@@ -52,7 +58,7 @@ def test_database_from_before_migrations_is_adopted(tmp_path):
     Base.metadata.create_all(engine)
     assert "alembic_version" not in inspect(engine).get_table_names()
     init_db(engine)
-    assert version(engine) == "0001"
+    assert version(engine) == HEAD
 
 
 def test_downgrade_and_upgrade_again(tmp_path):

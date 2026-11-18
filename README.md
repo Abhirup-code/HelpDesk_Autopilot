@@ -33,10 +33,10 @@ A self-service IT help desk that automates the most common tickets (new-hire set
 
 At small and mid-size companies, one or two IT people handle every request by hand:
 
-- Password resets and new-hire setups eat most of the day.
+- Password resets and new-hire setups eat most of the day, and the same handful of questions come back every week.
 - There is no clear record of who changed whose access, or when.
 - Offboarding gets missed, so former employees keep working accounts.
-- Nobody can say how long tickets take, or which ones break the SLA.
+- Nobody can say how long tickets take, which ones break the SLA, or whether the person who raised one was happy.
 
 ## The solution
 
@@ -48,6 +48,7 @@ HelpDesk Autopilot turns routine tickets into automated, approved and logged wor
 | New hire | IT creates the account and adds groups from an email | Account and groups created from the request |
 | Offboarding | Often delayed or forgotten | Account disabled and groups removed on the last day |
 | Access request | Approved in chat, no record | Manager approval required, logged |
+| "How do I...?" | Asked again every week | Answered by a help page, offered before the ticket form |
 
 ## Architecture
 
@@ -85,6 +86,23 @@ flowchart LR
 - [x] CI pipeline with security scans
 - [x] Prometheus metrics and Grafana SLA dashboard
 - [x] Demo data, screenshots and walkthrough
+- [x] Ticket conversation: replies to the requester and internal notes for IT
+- [x] Assignment, priority changes, reopening, and satisfaction scores
+- [x] Knowledge base, offered on the new request form
+- [x] Business hours and holidays in the SLA clock
+
+## Working a ticket
+
+| What | Who | Notes |
+|---|---|---|
+| Reply | Anyone on the ticket | Goes in the thread and lands in the requester's inbox |
+| Internal note | IT agent | Never shown to the requester, in the API or on the page |
+| Assign | IT agent | Mine and Unassigned tabs on the queue; the new owner is told |
+| Change priority | IT agent | The due time moves with it; a closed ticket keeps its priority |
+| Reopen | Requester or IT | Within 7 days of resolving, with a reason, on a fresh SLA clock |
+| Rate | The requester | Once, 1 to 5, after it is resolved |
+
+Time to first reply is recorded the moment somebody other than the requester answers. An internal note does not count, because the person waiting has still heard nothing.
 
 ## Web portal
 
@@ -92,9 +110,9 @@ Open the setup link the seed command printed for a user, choose a password, then
 
 | Who | What they see |
 |---|---|
-| Employee | My tickets, new requests (password reset, access, hardware), inbox with reset links |
+| Employee | My tickets, new requests (password reset, access, hardware), the conversation on each ticket, help pages, inbox with reset links, reopen and rate a resolved ticket |
 | Manager | Everything above, plus approvals for their team and new hire / offboarding requests |
-| IT agent | The whole queue, status changes, second approval for admin rights, the audit log, and a link to the Grafana dashboard |
+| IT agent | The whole queue with Mine and Unassigned tabs, assignment, priority changes, status changes, internal notes, second approval for admin rights, CSV download, the audit log, and a link to the Grafana dashboard |
 
 The ticket list has a search box and three tabs: Open, Past due and All.
 
@@ -170,6 +188,7 @@ Then open:
 The dashboard shows:
 
 - **Right now:** open tickets, tickets breaching SLA, approvals waiting, SLA compliance, auto-resolve rate, median time to resolve
+- **How it felt from the other side:** median time to first reply, share of tickets answered at all, satisfaction out of 5, share reopened after resolving, and which help pages people actually read
 - **Trends:** tickets per day by type, and SLA compliance per day against the 90% target
 - **Where the time goes:** median time to resolve by ticket type, and outcomes
 - **Live from Prometheus:** API requests per second, 95th percentile latency, alerts firing

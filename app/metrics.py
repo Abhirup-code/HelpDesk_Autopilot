@@ -56,6 +56,27 @@ class TicketCollector(Collector):
             "Median time from creation to resolution, by type",
             labels=["type"],
         )
+        first_response = GaugeMetricFamily(
+            "helpdesk_first_response_seconds_median",
+            "Median time from a ticket arriving to its first reply, by type",
+            labels=["type"],
+        )
+        reopened = CounterMetricFamily(
+            "helpdesk_tickets_reopened",
+            "Times a ticket came back after being resolved, by type",
+            labels=["type"],
+        )
+        answered_rate = GaugeMetricFamily(
+            "helpdesk_tickets_answered_ratio",
+            "Share of tickets that have had a reply",
+        )
+        satisfaction = GaugeMetricFamily(
+            "helpdesk_satisfaction_mean",
+            "Average score out of 5 from the people whose tickets were resolved",
+        )
+        rated_rate = GaugeMetricFamily(
+            "helpdesk_tickets_rated_ratio", "Share of resolved tickets the requester scored"
+        )
         audit = CounterMetricFamily(
             "helpdesk_audit_events", "Audit log entries, by action", labels=["action"]
         )
@@ -63,8 +84,18 @@ class TicketCollector(Collector):
         open_counts: dict[tuple[str, str], int] = {}
         closed_counts: dict[tuple[str, str], int] = {}
         durations: dict[str, list[float]] = {}
+        responses: dict[str, list[float]] = {}
+        reopens: dict[str, int] = {}
+        scores: list[int] = []
+        answered = 0
         on_time = resolved = auto = breached = 0
         for t in tickets:
+            if t.reopen_count:
+                reopens[t.type.value] = reopens.get(t.type.value, 0) + t.reopen_count
+            replied = t.first_response_seconds()
+            if replied is not None:
+                answered += 1
+                responses.setdefault(t.type.value, []).append(float(replied))
             if t.status in CLOSED_STATUSES:
                 key = (t.type.value, t.status.value)
                 closed_counts[key] = closed_counts.get(key, 0) + 1
@@ -72,6 +103,8 @@ class TicketCollector(Collector):
                     continue
                 resolved += 1
                 auto += t.status == Status.AUTO_RESOLVED
+                if t.satisfaction is not None:
+                    scores.append(t.satisfaction)
                 on_time += not t.is_breached()
                 seconds = max((aware(t.resolved_at) - t.work_start()).total_seconds(), 0.0)
                 durations.setdefault(t.type.value, []).append(seconds)
@@ -86,11 +119,18 @@ class TicketCollector(Collector):
             closed.add_metric([ticket_type, outcome], count)
         for ticket_type, values in sorted(durations.items()):
             median_seconds.add_metric([ticket_type], median(values))
+        for ticket_type, values in sorted(responses.items()):
+            first_response.add_metric([ticket_type], median(values))
+        for ticket_type, count in sorted(reopens.items()):
+            reopened.add_metric([ticket_type], count)
         for action, count in sorted(audit_counts):
             audit.add_metric([action], count)
         breached_open.add_metric([], breached)
         compliance.add_metric([], on_time / resolved if resolved else 1.0)
         auto_rate.add_metric([], auto / resolved if resolved else 0.0)
+        answered_rate.add_metric([], answered / len(tickets) if tickets else 0.0)
+        satisfaction.add_metric([], sum(scores) / len(scores) if scores else 0.0)
+        rated_rate.add_metric([], len(scores) / resolved if resolved else 0.0)
 
         yield from (
             open_tickets,
@@ -99,6 +139,11 @@ class TicketCollector(Collector):
             compliance,
             auto_rate,
             median_seconds,
+            first_response,
+            reopened,
+            answered_rate,
+            satisfaction,
+            rated_rate,
             audit,
         )
 

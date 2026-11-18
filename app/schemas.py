@@ -41,6 +41,65 @@ DETAIL_MODELS: dict[TicketType, type[BaseModel]] = {
 }
 
 
+class ArticleOut(BaseModel):
+    slug: str
+    title: str
+    body: str | None = None
+    ticket_type: TicketType | None = None
+    views: int = 0
+
+
+class RatingCreate(BaseModel):
+    score: int = Field(ge=1, le=5, description="1 is poor, 5 is excellent")
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class PriorityUpdate(BaseModel):
+    priority: Priority
+
+
+class ReopenRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=500, description="What is still wrong")
+
+    @field_validator("reason")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
+class AssigneeUpdate(BaseModel):
+    assignee: str | None = Field(
+        default=None, description="An IT agent's username, or null to unassign"
+    )
+
+
+class CommentCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=5000)
+    internal: bool = Field(
+        default=False, description="IT agents only: a note the requester never sees"
+    )
+
+    @field_validator("body")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
+class CommentOut(BaseModel):
+    id: int
+    ticket_id: int
+    author: str
+    body: str
+    internal: bool
+    created_at: datetime
+
+
 class TicketCreate(BaseModel):
     type: TicketType
     title: str = Field(min_length=3, max_length=200)
@@ -91,6 +150,14 @@ class TicketOut(BaseModel):
     )
     details: dict
     automation_error: str | None
+    assignee: str | None = None
+    satisfaction: int | None = None
+    satisfaction_comment: str | None = None
+    reopen_count: int = 0
+    first_response_at: datetime | None = None
+    first_response_seconds: int | None = Field(
+        default=None, description="Seconds from the ticket arriving to the first reply"
+    )
 
 
 class ApprovalDecision(BaseModel):
